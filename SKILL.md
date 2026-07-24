@@ -52,6 +52,18 @@ ManyVids、Eporner、Txxx、XXXYMovies……以及其他几十个。
 ### 学习
 Coursera、Udemy、Khan Academy、MasterClass、Ted Talks……
 
+## 📖 jm2pdf — JM 本号 → 压缩 PDF → 邮箱
+
+另一条线：输入 JM 漫画本号，自动下载、压缩、生成 PDF，发到 QQ 邮箱。
+
+```bash
+python jm2pdf.py 123456           # 下载 JM123456 并发邮件
+python jm2pdf.py JM289490         # JM 前缀也行
+python jm2pdf.py 123456 --no-send # 只生成 PDF，不发邮件
+```
+
+依赖：`pip install jmcomic img2pdf Pillow`
+
 ## 抖音登录
 
 ```bash
