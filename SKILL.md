@@ -1,159 +1,68 @@
 ---
 name: video-qa
 description: >
-  Universal video content Q&A tool. Download any video's audio, transcribe
-  with Whisper, and answer questions. Supports 1750+ sites via yt-dlp.
-  Works with any AI agent: Claude Code, Codex, ZCode, Cursor, etc.
+  扔视频链接，下载音频，转文字，你随便问。
+  支持 1750+ 网站。任何 Agent 都能用。
 ---
 
-# video-qa: Universal Video Content Q&A
+# video-qa: 视频内容问答
 
-Give it a video URL → downloads audio → transcribes with Whisper →
-you ask questions about the content.
+扔链接 → 下载音频 → Whisper 转文字 → 你问啥我答啥
 
-## Requirements
+## 装啥
 
 ```bash
 pip install yt-dlp openai-whisper torch
-# Also need ffmpeg: winget install ffmpeg / brew install ffmpeg
+# 还要装 ffmpeg: winget install ffmpeg
 ```
 
-The script auto-detects the correct Python environment.
+脚本会自动找 Python 环境，不用配置。
 
-## Quick Start
+## 咋用
 
 ```bash
-python video_qa.py <video-url>
-python video_qa.py <video-url> --model small   # better accuracy
-python video_qa.py <video-url> --lang en       # English video
-python video_qa.py <video-url> --json           # JSON output
+python video_qa.py <视频链接>
+python video_qa.py <视频链接> --model small    # 更准但慢点
+python video_qa.py <视频链接> --lang en        # 英文视频
+python video_qa.py <视频链接> --json            # JSON 输出
 ```
 
-## Supported Platforms (1750+)
+## 支持哪些站
 
-### 🇨🇳 China (direct access)
+### 国内（直连）
 
-| Platform | Type | Notes |
-|:---------|:-----|:------|
-| **Bilibili** 🎬 | Video/Live/Courses | Fully tested ✅ |
-| **Douyin** (抖音) | Short video | Needs 1-time cookie login |
-| **Kuaishou** (快手) | Short video | |
-| **Xiaohongshu** (小红书) | Video notes | |
-| **Weibo** (微博) | Video/Live | |
-| **Youku** (优酷) | Long video/Shows | |
-| **iQiyi** (爱奇艺) | Long video/Shows | |
-| **Tencent Video** (腾讯视频) | Long video/Shows | |
-| **Mango TV** (芒果TV) | Variety/Shows | |
-| **Xigua Video** (西瓜视频) | Mid-length video | |
-| **Sohu Video** (搜狐视频) | Long video | |
-| **AcFun** | Video/Anime | |
-| **Huya** (虎牙) | Game live | |
-| **Douyu** (斗鱼) | Game live | |
-| **Zhihu** (知乎) | Video answers | |
-| **WeChat Channels** (视频号) | Short video | |
+B站、抖音、快手、小红书、微博、优酷、爱奇艺、腾讯视频、
+芒果TV、西瓜视频、搜狐、AcFun、虎牙、斗鱼、知乎、视频号……
 
-### 🌐 Global (VPN needed for some)
+> 抖音需要先跑一次 cookie 登录
 
-| Platform | Type | Notes |
-|:---------|:-----|:------|
-| **YouTube** | Video/Shorts/Live | Needs VPN in CN |
-| **Netflix** | Movies/Shows | |
-| **HBO / Max** | Movies/Shows | |
-| **Disney+** | Movies/Shows | |
-| **Amazon Prime Video** | Movies/Shows | |
-| **Apple TV+** | Movies/Shows | |
-| **Hulu** | Shows/Variety | |
-| **Paramount+** | Movies/Shows | |
-| **Peacock** | Movies/Shows | |
-| **Discovery+** | Documentaries | |
-| **BBC iPlayer** | UK TV | |
-| **ITV / Channel 4** | UK TV | |
-| **TF1 / France TV** | French TV | |
-| **RAI** | Italian TV | |
-| **NHK / Fuji TV / TBS** | Japanese TV | |
-| **CBC** | Canadian TV | |
+### 国外（部分需代理）
 
-### 📱 Social / Short Video
+YouTube、Netflix、HBO、Disney+、Amazon Prime、Apple TV+、
+Hulu、BBC iPlayer、TikTok、Instagram、Facebook、Twitter、
+Twitch、Reddit、Spotify、SoundCloud……
 
-| Platform | Type |
-|:---------|:-----|
-| **TikTok** | Short video |
-| **Instagram** | Video/Reels/Stories |
-| **Facebook** | Video |
-| **Twitter / X** | Video |
-| **Snapchat** | Spotlight |
-| **Reddit** | Video |
-| **Pinterest** | Video |
-| **LinkedIn** | Video |
-| **Tumblr** | Video |
+### 学习
 
-### 🎮 Live / Gaming
+Coursera、Udemy、Khan Academy、MasterClass、Ted Talks……
 
-| Platform | Type |
-|:---------|:-----|
-| **Twitch** | Live/VOD/Clips |
-| **Kick** | Live/VOD |
-| **DLive** | Live/VOD |
-| **Steam** | Broadcasts/Community |
+**总共 1750+ 个网站，都是 yt-dlp 在维护，不用我操心。**
 
-### 📚 Education
+## 抖音登录
 
-| Platform |
-|:---------|
-| **Coursera, Udemy, Skillshare, MasterClass** |
-| **Khan Academy, MIT OCW, Ted Talks** |
-| **Pluralsight, Frontend Masters, Laracasts** |
-
-### 🎵 Music / Podcasts
-
-| Platform |
-|:---------|
-| **Spotify, SoundCloud, Bandcamp, Mixcloud** |
-| **Apple Podcasts, BBC Radio, NPR** |
-| **网易云音乐, QQ音乐** |
-
-### 📺 News
-
-| Platform |
-|:---------|
-| **BBC, CNN, NBC, ABC, CBS, FOX, NPR, PBS** |
-| **Bloomberg, WSJ, NYTimes, Washington Post** |
-| **Al Jazeera, France24, DW, CGTN** |
-| **Sky News, The Guardian** |
-
-## Cookie Login (for Douyin / Weibo / Twitter)
-
-Some platforms require authentication:
+有些站要登录才能下（抖音、微博等）：
 
 ```bash
-cd C:/Users/windows/ZCodeProject/douyin-downloader
+cd douyin-downloader
 python tools/cookie_fetcher.py --output config/cookies.json
 ```
-Opens a browser — scan QR code to login. Cookies persist for future use.
+会弹浏览器，扫码登录，之后就不用再登了。
 
-## Acknowledgments
+## 用到了啥
 
-This project builds on several amazing open-source projects:
-
-| Project | Role | License |
-|:--------|:-----|:--------|
-| **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** | Core download engine (1750+ site extractors) | Unlicense |
-| **[openai-whisper](https://github.com/openai/whisper)** | Speech-to-text model | MIT |
-| **[jiji262/douyin-downloader](https://github.com/jiji262/douyin-downloader)** | Douyin cookie login reference | MIT |
-| **[PyTorch](https://github.com/pytorch/pytorch)** | Whisper backend | BSD |
-| **[FFmpeg](https://ffmpeg.org)** | Audio processing | LGPL/GPL |
-
-## Output
-
-```
-🧠 Transcribing with whisper (small)...
-  ⏱ Model loaded in 2.0s
-  ⏱ Transcribed in 13.9s
-
-Full transcript text...
-
----
-### 📌 Timestamps
-[00:00] First segment
-[00:15] Second segment
-```
+| 项目 | 干啥的 |
+|:-----|:-------|
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 下载视频/音频（核心） |
+| [openai-whisper](https://github.com/openai/whisper) | 语音转文字 |
+| [jiji262/douyin-downloader](https://github.com/jiji262/douyin-downloader) | 抖音登录参考 |
+| PyTorch + FFmpeg | 跑模型 + 处理音频 |
