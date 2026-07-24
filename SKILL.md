@@ -1,82 +1,159 @@
 ---
 name: video-qa
 description: >
-  Download any video's audio, transcribe with Whisper, and answer questions
-  about the content. Supports Bilibili, Douyin (with cookies), YouTube,
-  and 1000+ sites supported by yt-dlp.
+  Universal video content Q&A tool. Download any video's audio, transcribe
+  with Whisper, and answer questions. Supports 1750+ sites via yt-dlp.
+  Works with any AI agent: Claude Code, Codex, ZCode, Cursor, etc.
 ---
 
-# video-qa: Video Content Q&A
+# video-qa: Universal Video Content Q&A
 
-Give it a video URL → it downloads the audio → transcribes with Whisper →
+Give it a video URL → downloads audio → transcribes with Whisper →
 you ask questions about the content.
 
 ## Requirements
 
-- Python 3.12+
-- `yt-dlp` — `pip install yt-dlp`
-- `ffmpeg` — `winget install ffmpeg` or `brew install ffmpeg`
-- `openai-whisper` + `torch` — `pip install openai-whisper torch`
+```bash
+pip install yt-dlp openai-whisper torch
+# Also need ffmpeg: winget install ffmpeg / brew install ffmpeg
+```
 
-Everything is checked automatically. The script finds the right Python.
+The script auto-detects the correct Python environment.
 
-## Usage
+## Quick Start
 
 ```bash
-# Basic: transcribe a video
 python video_qa.py <video-url>
-
-# Better accuracy (slower)
-python video_qa.py <video-url> --model small
-
-# English video
-python video_qa.py <video-url> --lang en
-
-# JSON output for programmatic use
-python video_qa.py <video-url> --json
+python video_qa.py <video-url> --model small   # better accuracy
+python video_qa.py <video-url> --lang en       # English video
+python video_qa.py <video-url> --json           # JSON output
 ```
 
-## Examples
+## Supported Platforms (1750+)
 
-```bash
-# Bilibili (works in China)
-python video_qa.py https://www.bilibili.com/video/BV1GJ411x7e7
+### 🇨🇳 China (direct access)
 
-# Douyin (requires cookies — run cookie login first)
-python video_qa.py https://www.douyin.com/video/7665535066596065359
+| Platform | Type | Notes |
+|:---------|:-----|:------|
+| **Bilibili** 🎬 | Video/Live/Courses | Fully tested ✅ |
+| **Douyin** (抖音) | Short video | Needs 1-time cookie login |
+| **Kuaishou** (快手) | Short video | |
+| **Xiaohongshu** (小红书) | Video notes | |
+| **Weibo** (微博) | Video/Live | |
+| **Youku** (优酷) | Long video/Shows | |
+| **iQiyi** (爱奇艺) | Long video/Shows | |
+| **Tencent Video** (腾讯视频) | Long video/Shows | |
+| **Mango TV** (芒果TV) | Variety/Shows | |
+| **Xigua Video** (西瓜视频) | Mid-length video | |
+| **Sohu Video** (搜狐视频) | Long video | |
+| **AcFun** | Video/Anime | |
+| **Huya** (虎牙) | Game live | |
+| **Douyu** (斗鱼) | Game live | |
+| **Zhihu** (知乎) | Video answers | |
+| **WeChat Channels** (视频号) | Short video | |
 
-# YouTube (outside China)
-python video_qa.py https://www.youtube.com/watch?v=xxxx
-```
+### 🌐 Global (VPN needed for some)
 
-## Agent Instructions
+| Platform | Type | Notes |
+|:---------|:-----|:------|
+| **YouTube** | Video/Shorts/Live | Needs VPN in CN |
+| **Netflix** | Movies/Shows | |
+| **HBO / Max** | Movies/Shows | |
+| **Disney+** | Movies/Shows | |
+| **Amazon Prime Video** | Movies/Shows | |
+| **Apple TV+** | Movies/Shows | |
+| **Hulu** | Shows/Variety | |
+| **Paramount+** | Movies/Shows | |
+| **Peacock** | Movies/Shows | |
+| **Discovery+** | Documentaries | |
+| **BBC iPlayer** | UK TV | |
+| **ITV / Channel 4** | UK TV | |
+| **TF1 / France TV** | French TV | |
+| **RAI** | Italian TV | |
+| **NHK / Fuji TV / TBS** | Japanese TV | |
+| **CBC** | Canadian TV | |
 
-1. User gives you a video URL
-2. Run `python <path>/video_qa.py <url> --model small`
-3. Read the transcript output
-4. Answer the user's questions about the content
+### 📱 Social / Short Video
 
-## Cookie Login (for Douyin/抖音)
+| Platform | Type |
+|:---------|:-----|
+| **TikTok** | Short video |
+| **Instagram** | Video/Reels/Stories |
+| **Facebook** | Video |
+| **Twitter / X** | Video |
+| **Snapchat** | Spotlight |
+| **Reddit** | Video |
+| **Pinterest** | Video |
+| **LinkedIn** | Video |
+| **Tumblr** | Video |
+
+### 🎮 Live / Gaming
+
+| Platform | Type |
+|:---------|:-----|
+| **Twitch** | Live/VOD/Clips |
+| **Kick** | Live/VOD |
+| **DLive** | Live/VOD |
+| **Steam** | Broadcasts/Community |
+
+### 📚 Education
+
+| Platform |
+|:---------|
+| **Coursera, Udemy, Skillshare, MasterClass** |
+| **Khan Academy, MIT OCW, Ted Talks** |
+| **Pluralsight, Frontend Masters, Laracasts** |
+
+### 🎵 Music / Podcasts
+
+| Platform |
+|:---------|
+| **Spotify, SoundCloud, Bandcamp, Mixcloud** |
+| **Apple Podcasts, BBC Radio, NPR** |
+| **网易云音乐, QQ音乐** |
+
+### 📺 News
+
+| Platform |
+|:---------|
+| **BBC, CNN, NBC, ABC, CBS, FOX, NPR, PBS** |
+| **Bloomberg, WSJ, NYTimes, Washington Post** |
+| **Al Jazeera, France24, DW, CGTN** |
+| **Sky News, The Guardian** |
+
+## Cookie Login (for Douyin / Weibo / Twitter)
+
+Some platforms require authentication:
 
 ```bash
 cd C:/Users/windows/ZCodeProject/douyin-downloader
 python tools/cookie_fetcher.py --output config/cookies.json
 ```
-Opens a browser — scan the QR code to login. Cookies persist for future downloads.
+Opens a browser — scan QR code to login. Cookies persist for future use.
 
-## What it outputs
+## Acknowledgments
+
+This project builds on several amazing open-source projects:
+
+| Project | Role | License |
+|:--------|:-----|:--------|
+| **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** | Core download engine (1750+ site extractors) | Unlicense |
+| **[openai-whisper](https://github.com/openai/whisper)** | Speech-to-text model | MIT |
+| **[jiji262/douyin-downloader](https://github.com/jiji262/douyin-downloader)** | Douyin cookie login reference | MIT |
+| **[PyTorch](https://github.com/pytorch/pytorch)** | Whisper backend | BSD |
+| **[FFmpeg](https://ffmpeg.org)** | Audio processing | LGPL/GPL |
+
+## Output
 
 ```
 🧠 Transcribing with whisper (small)...
-  ⏱ Model loaded in 12.3s
-  ⏱ Transcribed in 8.2s
-
-# 🎬 Video Title
+  ⏱ Model loaded in 2.0s
+  ⏱ Transcribed in 13.9s
 
 Full transcript text...
 
 ---
 ### 📌 Timestamps
-[00:00] First segment...
-[00:15] Second segment...
+[00:00] First segment
+[00:15] Second segment
 ```
