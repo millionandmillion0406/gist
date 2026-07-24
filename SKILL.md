@@ -1,11 +1,11 @@
 ---
-name: video-qa
+name: gist
 description: >
   扔视频链接，下载音频，转文字，你随便问。
   支持 1750+ 网站。任何 Agent 都能用。
 ---
 
-# video-qa: 视频内容问答
+# gist: 视频内容问答 — 取视频的精要
 
 扔链接 → 下载音频 → Whisper 转文字 → 你问啥我答啥
 
