@@ -72,7 +72,7 @@ print(r[0]['text'])
             # 清理 FunASR 进度输出，只保留中文文本
             lines = out.strip().split("\n")
             text = ' '.join(l for l in lines if not l.startswith('Download') and not l.startswith('Processing') and not l.startswith('funasr') and l.strip())
-            return text.replace(" ", "").strip()[:2000]
+            return text.replace(" ", "").strip()
 
     print("🎤 听写中（Whisper）...", flush=True)
     code = f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{audio_path}',language='zh',verbose=False); print(r['text'])"
@@ -251,9 +251,9 @@ def distill(transcript, vision=None):
         if lines:
             vis = "\n画面：\n" + "\n".join(lines[:2])
 
-    prompt = f"""分析这段视频内容，做 3 件事：
+    prompt = f"""分析整段视频内容（从头到尾都要覆盖），做 3 件事：
 
-1. 纠错：修正错别字和不通顺的地方，保留口语气质
+1. 纠错：修正错別字和不通顺的地方，保留口语气质
 2. 一句话概括核心主题
 3. 提取结构化内容（没有就不写）：
    - 🧠 思维模型/框架
