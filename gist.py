@@ -101,19 +101,75 @@ def analyze_frame(frame_path, local_model=None):
 
 
 def visual_analysis(video_path, duration):
+    """场景检测 + 逐镜分析 — 基于 VideoContextEngine 的 HSV 直方图方案"""
     if not video_path or duration <= 0: return []
     print("👁️ 分析画面...", flush=True)
+
     local_model = has_local_vision()
-    if local_model: print(f"  🖥️ 本地模型: {local_model}", flush=True)
+    if local_model:
+        print(f"  🖥️ 本地模型: {local_model}", flush=True)
+    else:
+        print(f"  ☁️ 云端识别", flush=True)
+
+    # 场景检测：HSV 直方图对比，画面变了才算新场景
+    scenes = []
+    try:
+        code = """
+import cv2, json, numpy as np
+cap = cv2.VideoCapture(r"VIDEO_PATH")
+fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+interval = int(fps)
+scenes = []
+last_hist = None
+start = 0.0
+prev = 0.0
+idx = 0
+while True:
+    ret, frame = cap.read()
+    if not ret: break
+    if idx % interval == 0:
+        now = idx / fps
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv],[0,1],None,[50,60],[0,180,0,256])
+        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+        hist = hist.flatten()
+        change = False
+        if last_hist is not None:
+            score = cv2.compareHist(last_hist, hist, cv2.HISTCMP_CORREL)
+            if (1.0 - score) > 0.3: change = True
+        if (change and (now - start) >= 2) or (now - start) >= 60:
+            scenes.append({"start": start, "end": prev})
+            start = now
+        last_hist = hist
+        prev = now
+    idx += 1
+if prev > start: scenes.append({"start": start, "end": prev})
+cap.release()
+print(json.dumps(scenes))
+""".replace("VIDEO_PATH", str(video_path))
+        rc, out, _ = subprocess.run([PY, "-c", code], capture_output=True, text=True, timeout=300)
+        if rc == 0 and out.strip():
+            scenes = json.loads(out.strip())
+    except:
+        pass
+
+    if not scenes:
+        scenes = [{"start": 0, "end": min(int(duration), 300)}]
+    print(f"  📐 {len(scenes)} 个场景", flush=True)
+
+    # 逐场景分析关键帧
     results = []
-    for ts in range(0, min(int(duration), 300), 30):
-        frame = WORK_DIR / f"f{ts:04d}.jpg"
+    for i, s in enumerate(scenes):
+        if i > 5: break  # 最多看 6 个场景
+        ts = s["start"] + (s["end"] - s["start"]) / 2
+        frame = WORK_DIR / f"s{i:02d}.jpg"
         subprocess.run(["ffmpeg", "-ss", str(ts), "-i", str(video_path), "-vframes", "1", "-q:v", "2", str(frame)],
             capture_output=True, timeout=30)
         if frame.exists():
             desc = analyze_frame(frame, local_model)
-            if desc: results.append({"time": f"{ts}s", "desc": desc})
+            if desc: results.append({"time": f"{int(s['start'])}s", "desc": desc})
             frame.unlink()
+
     return results
 
 
