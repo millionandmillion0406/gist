@@ -5,7 +5,7 @@ gist — 扔视频链接，AI自动分析、总结拆解、然后和你交流。
 流程：下载 → 转录 → 场景检测 → 视觉分析 → AI蒸馏 → 讨论
 """
 
-import argparse, json, os, subprocess, sys, time, urllib.request, shutil, base64
+import argparse, hashlib, json, mimetypes, os, subprocess, sys, time, urllib.request, uuid
 from pathlib import Path
 
 WORK_DIR = Path(__file__).parent / "tmp"
@@ -20,12 +20,11 @@ for c in [sys.executable, r"C:\Users\windows\AppData\Local\Programs\Python\Pytho
     if subprocess.run([c, "-c", "import whisper"], capture_output=True).returncode == 0:
         PY = c; break
 
-# 检测可用能力
-HAS_CV = subprocess.run([PY, "-c", "import cv2"], capture_output=True).returncode == 0
-HAS_VLM = False
-r = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
-if "qwen3" in (r.stdout or "") or "minicpm" in (r.stdout or ""):
-    HAS_VLM = True
+AUTOGLM_APP_ID = "100003"
+AUTOGLM_APP_KEY = "38d2391985e2369a5fb8227d8e6cd5e5"
+AUTOGLM_TOKEN_URL = "http://127.0.0.1:18432/get_token"
+AUTOGLM_UPLOAD_URL = "https://autoglm-api.zhipuai.cn/agentdr/v1/assistant/upload-mix"
+AUTOGLM_RECOG_URL = "https://autoglm-api.zhipuai.cn/agentdr/v1/assistant/images-recognition"
 
 
 def sh(cmd, timeout=300):
@@ -61,90 +60,41 @@ def transcribe(audio_path):
     return out.strip() if rc == 0 else ""
 
 
-# ── 3. 场景检测 + 视觉分析 ──
+# ── 3. 视觉分析（AutoGLM 云端识别）──
 
-def detect_scenes(video_path, threshold=0.3, min_dur=2, max_dur=60):
-    """HSV 直方图场景检测 - 来自 VideoContextEngine"""
-    if not HAS_CV: return []
-    code = f"""
-import cv2, json, numpy as np
-cap = cv2.VideoCapture(r"{video_path}")
-fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-interval = int(fps)
-scenes = []
-last_hist = None
-start = 0.0
-prev = 0.0
-idx = 0
-while True:
-    ret, frame = cap.read()
-    if not ret: break
-    if idx % interval == 0:
-        now = idx / fps
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        hist = cv2.calcHist([hsv],[0,1],None,[50,60],[0,180,0,256])
-        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
-        hist = hist.flatten()
-        change = False
-        if last_hist is not None:
-            score = cv2.compareHist(last_hist, hist, cv2.HISTCMP_CORREL)
-            if (1.0 - score) > {threshold}: change = True
-        if (change and (now - start) >= {min_dur}) or (now - start) >= {max_dur}:
-            scenes.append({{"start": start, "end": prev}})
-            start = now
-        last_hist = hist
-        prev = now
-    idx += 1
-if prev > start: scenes.append({{"start": start, "end": prev}})
-cap.release()
-print(json.dumps(scenes, ensure_ascii=False))
-"""
-    rc, out, _ = sh([PY, "-c", code], timeout=300)
-    if rc != 0 or not out.strip(): return []
-    try: return json.loads(out.strip())
-    except: return []
+AUTOGLM_SKILL_DIR = Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition")
 
-
-def analyze_scene(video_path, scene, vlm_model="qwen3-vl:2b"):
-    """用 VLM 分析一个场景的关键帧"""
-    if not HAS_VLM: return ""
-    ts = scene["start"] + (scene["end"] - scene["start"]) / 2
-    frame = WORK_DIR / "kf.jpg"
-    sh(["ffmpeg", "-ss", str(ts), "-i", str(video_path), "-vframes", "1", "-q:v", "2", str(frame)], timeout=30)
-    if not frame.exists(): return ""
-
-    b64 = base64.b64encode(frame.read_bytes()).decode()
-    frame.unlink()
-
-    data = json.dumps({"model": vlm_model, "prompt": "简短描述这个画面", "images": [b64], "stream": False}).encode()
-    req = urllib.request.Request("http://localhost:11434/api/generate", data=data,
-        headers={"Content-Type": "application/json"})
+def analyze_frame_auto(frame_path):
+    """用 AutoGLM 识别画面内容"""
     try:
-        resp = json.loads(urllib.request.urlopen(req, timeout=120).read())
-        return resp.get("response", "").strip()
-    except:
+        # 上传
+        r1 = subprocess.run([PY, str(AUTOGLM_SKILL_DIR / "upload-mix.py"), str(frame_path)],
+            capture_output=True, text=True, timeout=30)
+        if r1.returncode != 0: return ""
+        url = json.loads(r1.stdout)["data"]["oss_info"][0]["oss_url"]
+
+        # 识别
+        r2 = subprocess.run([PY, str(AUTOGLM_SKILL_DIR / "image-recognition.py"), url],
+            capture_output=True, text=True, timeout=30)
+        if r2.returncode != 0: return ""
+        return json.loads(r2.stdout)["data"]["text"][:100]
+    except Exception as e:
         return ""
 
 
 def visual_analysis(video_path, duration):
-    """场景检测 + 视觉分析"""
-    if not video_path: return []
+    """每隔 30 秒分析一帧画面"""
+    if not video_path or duration <= 0: return []
     print("👁️ 分析画面...", flush=True)
-
-    scenes = detect_scenes(video_path)
-    if not scenes:
-        # 降级：等间隔抽帧
-        scenes = [{"start": i, "end": i + 30} for i in range(0, int(duration), 30)]
-
-    print(f"  📐 {len(scenes)} 个场景", flush=True)
-
     results = []
-    for i, scene in enumerate(scenes):
-        if i > 0 and HAS_VLM:
-            desc = analyze_scene(video_path, scene)
-            if desc:
-                results.append({"time": f"{scene['start']:.0f}s", "desc": desc[:100]})
-
+    for ts in range(0, min(int(duration), 300), 30):  # 最多看 5 分钟
+        frame = WORK_DIR / f"f{ts:04d}.jpg"
+        subprocess.run(["ffmpeg", "-ss", str(ts), "-i", str(video_path), "-vframes", "1", "-q:v", "2", str(frame)],
+            capture_output=True, timeout=30)
+        if frame.exists():
+            desc = analyze_frame_auto(frame)
+            if desc: results.append({"time": f"{ts}s", "desc": desc})
+            frame.unlink()
     return results
 
 
