@@ -229,86 +229,37 @@ def extract_note(url):
 def distill(transcript, vision=None):
     if not transcript.strip():
         return "⚠ 未检测到语音内容"
-    print("🧠 AI 分析中（3 提取器并行）...", flush=True)
+    print("🧠 AI 分析中...", flush=True)
 
+    # 精简画面描述：去掉 UI 描述，只保留内容
     vis = ""
     if vision:
-        vis = "\n画面内容：\n" + "\n".join([f"[{v['time']}] {v['desc']}" for v in vision])
+        lines = []
+        for v in vision:
+            t = v['desc']
+            # 跳过纯 UI 描述
+            if len(t) < 20 or any(k in t[:20] for k in ["界面", "按钮", "图标", "截图", "布局"]):
+                continue
+            lines.append(f"[{v['time']}] {t}")
+        if lines:
+            vis = "\n画面：\n" + "\n".join(lines[:2])
 
-    # 3 个并行提取器
-    prompts = {
-        "corrector": f"""你是视频内容纠错助手。下面是一段语音识别结果，请做两件事：
-1. 修正错别字和不通顺的地方，保留口语气质
-2. 用一句话概括核心主题
+    prompt = f"""分析这段视频内容，做 3 件事：
 
-识别结果：
-{transcript}{vis}
-
-输出格式：
-## 📌 核心主题
-[一句话]
-
-## 📝 校正全文
-[纠错后的文本]""",
-
-        "framework": f"""你是视频分析专家。从下面这段视频内容中，提取：
-1. 🧠 思维模型/框架 — 用的什么思考方法、决策框架
-2. 📏 原则/规则 — 明确提出的"应该/不应该"的断言
-
-没有就不写，不要编。
+1. 纠错：修正错别字和不通顺的地方，保留口语气质
+2. 一句话概括核心主题
+3. 提取结构化内容（没有就不写）：
+   - 🧠 思维模型/框架
+   - 📏 原则/规则  
+   - 📖 案例
+   - ⚠️ 边界/注意
+   - 💡 可执行步骤
 
 内容：
-{transcript}{vis}
+{transcript}{vis}"""
 
-输出格式：
-## 🧠 思维模型/框架
-- ...
-## 📏 原则/规则
-- ...""",
-
-        "insight": f"""你是视频内容拆解专家。从下面这段视频内容中，提取：
-1. 📖 案例 — 提到的具体例子
-2. ⚠️ 边界/注意 — 限制条件、容易出错的地方
-3. 💡 可执行步骤 — 可以直接照着做的操作流程
-
-没有就不写，不要编。
-
-内容：
-{transcript}{vis}
-
-输出格式：
-## 📖 案例
-- ...
-## ⚠️ 边界/注意
-- ...
-## 💡 可执行步骤
-- ...""",
-    }
-
-    # 并行调用
-    import threading
-    results = {}
-
-    def worker(name, prompt):
-        results[name] = llm_call(prompt)
-
-    threads = []
-    for name, prompt in prompts.items():
-        t = threading.Thread(target=worker, args=(name, prompt))
-        t.start()
-        threads.append(t)
-
-    for t in threads:
-        t.join()
-
-    # 合并结果
-    output = []
-    for name in ["corrector", "framework", "insight"]:
-        if results.get(name):
-            output.append(results[name])
-
-    final = "\n\n".join(output) if output else transcript
-    return final
+    result = llm_call(prompt, max_tokens=4096)
+    return result if result else transcript
 
 
 # ── 主流程 ──
