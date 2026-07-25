@@ -70,8 +70,7 @@ print(r[0]['text'])
         rc, out, _ = sh([PY, "-c", code], timeout=1800)
         if rc == 0 and out.strip():
             # 清理 FunASR 进度输出，只保留中文文本
-            lines = out.strip().split('
-')
+            lines = out.strip().split("\n")
             text = ' '.join(l for l in lines if not l.startswith('Download') and not l.startswith('Processing') and not l.startswith('funasr') and l.strip())
             return text.replace(" ", "").strip()[:2000]
 
@@ -208,6 +207,25 @@ def llm_call(prompt, max_tokens=2048):
         return f""
 
 
+# ── 5. 抖音图文提取（调用 douyin_note.py）──
+
+def extract_note(url):
+    """调用 douyin_note.py 提取图文"""
+    note_py = Path(__file__).parent / "douyin_note.py"
+    pw_py = r"C:\Users\windows\AppData\Local\Programs\Python\Python312\python.exe"
+    try:
+        rc, out, _ = sh([pw_py, str(note_py), url], timeout=60)
+        if rc != 0: return "⚠ 提取失败"
+        for line in out.split("\n"):
+            if line.startswith("📝 图文内容："):
+                return line[len("📝 图文内容："):].strip()
+        # 尝试从输出中找正文
+        lines = [l for l in out.split("\n") if len(l) > 20 and "界面" not in l[:8]]
+        return "\n".join(lines[:5]) if lines else "⚠ 未能提取内容"
+    except Exception as e:
+        return f"⚠ 需要 playwright：pip install playwright && playwright install chromium"
+
+
 def distill(transcript, vision=None):
     if not transcript.strip():
         return "⚠ 未检测到语音内容"
@@ -300,9 +318,23 @@ def main():
     ap.add_argument("url", help="视频链接")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--vision", action="store_true", help="启用画面分析（需 Ollama + 视觉模型）")
+    ap.add_argument("--note", action="store_true", help="抖音图文模式（需 Chrome 登录抖音）")
     args = ap.parse_args()
 
     t0 = time.time()
+
+    # 图文模式（跳过视频管线）
+    if args.note:
+        print("📖 图文模式...", flush=True)
+        text = extract_note(args.url)
+        analysis = distill(text)
+        elapsed = f"{time.time()-t0:.0f}s"
+        result = {"text": text, "analysis": analysis, "elapsed": elapsed}
+        (Path(__file__).parent / "last_analysis.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        print(f"\n{'='*50}")
+        print(f"  gist 完成 ⏱ {elapsed}")
+        print(f"{'='*50}\n{analysis}\n{'='*50}\n  来聊 👊\n{'='*50}")
+        return
 
     # 1. 下载
     audio = download(args.url)
