@@ -60,39 +60,58 @@ def transcribe(audio_path):
     return out.strip() if rc == 0 else ""
 
 
-# ── 3. 视觉分析（AutoGLM 云端识别）──
+# ── 3. 视觉分析（自动选择引擎）──
 
 AUTOGLM_SKILL_DIR = Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition")
 
-def analyze_frame_auto(frame_path):
-    """用 AutoGLM 识别画面内容"""
+def has_local_vision():
+    """检查本地是否有可用的视觉模型"""
+    r = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
+    for m in ["llava", "minicpm", "bakllava"]:
+        if m in (r.stdout or "").lower():
+            return m
+    return None
+
+def analyze_frame(frame_path, local_model=None):
+    """分析单帧画面——优先本地，兜底云端"""
+    if local_model:
+        import base64
+        b64 = base64.b64encode(open(frame_path, "rb").read()).decode()
+        data = json.dumps({"model": f"{local_model}:latest", "prompt": "简短描述这个画面", "images": [b64], "stream": False}).encode()
+        req = urllib.request.Request("http://localhost:11434/api/generate", data=data,
+            headers={"Content-Type": "application/json"})
+        try:
+            resp = json.loads(urllib.request.urlopen(req, timeout=120).read())
+            desc = resp.get("response", "").strip()[:100]
+            if desc: return desc
+        except: pass
+
+    # 兜底：AutoGLM 云端
     try:
-        # 上传
         r1 = subprocess.run([PY, str(AUTOGLM_SKILL_DIR / "upload-mix.py"), str(frame_path)],
             capture_output=True, text=True, timeout=30)
         if r1.returncode != 0: return ""
         url = json.loads(r1.stdout)["data"]["oss_info"][0]["oss_url"]
-
-        # 识别
         r2 = subprocess.run([PY, str(AUTOGLM_SKILL_DIR / "image-recognition.py"), url],
             capture_output=True, text=True, timeout=30)
         if r2.returncode != 0: return ""
         return json.loads(r2.stdout)["data"]["text"][:100]
-    except Exception as e:
+    except:
         return ""
 
 
 def visual_analysis(video_path, duration):
-    """每隔 30 秒分析一帧画面"""
     if not video_path or duration <= 0: return []
     print("👁️ 分析画面...", flush=True)
+    local_model = has_local_vision()
+    if local_model: print(f"  🖥️ 本地模型: {local_model}", flush=True)
     results = []
-    for ts in range(0, min(int(duration), 300), 30):  # 最多看 5 分钟
+    for ts in range(0, min(int(duration), 300), 30):
         frame = WORK_DIR / f"f{ts:04d}.jpg"
         subprocess.run(["ffmpeg", "-ss", str(ts), "-i", str(video_path), "-vframes", "1", "-q:v", "2", str(frame)],
             capture_output=True, timeout=30)
         if frame.exists():
-            desc = analyze_frame_auto(frame)
+            desc = analyze_frame(frame, local_model)
             if desc: results.append({"time": f"{ts}s", "desc": desc})
             frame.unlink()
     return results
