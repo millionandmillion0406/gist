@@ -27,25 +27,23 @@ async def main():
 
     print(f"📖 打开图文...", flush=True)
     async with async_playwright() as p:
-        # 用用户 Chrome 配置启动（复用登录态）
-        user_dir = os.path.expanduser("~/AppData/Local/Google/Chrome/User Data/Default")
-        use_chrome = os.path.exists(user_dir)
+        browser = await p.chromium.launch(headless=True)
+        ctx = await browser.new_context()
+        to_close = browser
 
-        if use_chrome:
-            ctx = await p.chromium.launch_persistent_context(
-                user_data_dir=user_dir, headless=True, no_viewport=True)
-            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-            to_close = ctx
-        else:
-            browser = await p.chromium.launch(headless=True)
-            ctx = await browser.new_context()
-            if COOKIES_JSON.exists():
-                try:
-                    cd = json.loads(COOKIES_JSON.read_text())
-                    await ctx.add_cookies([{"name":k,"value":v,"domain":".douyin.com","path":"/"} for k,v in cd.items()])
-                except: pass
-            page = await ctx.new_page()
-            to_close = browser
+        # 从 json cookies 设置登录态
+        if COOKIES_JSON.exists():
+            try:
+                cd = json.loads(COOKIES_JSON.read_text())
+                douyin_cookies = []
+                for k, v in cd.items():
+                    douyin_cookies.append({"name": k, "value": v, "domain": ".douyin.com", "path": "/"})
+                    douyin_cookies.append({"name": k, "value": v, "domain": ".amemv.com", "path": "/"})
+                await ctx.add_cookies(douyin_cookies)
+            except Exception as e:
+                print(f"  ⚠ cookies 加载失败: {e}", flush=True)
+
+        page = await ctx.new_page()
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
