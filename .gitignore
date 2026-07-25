@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+tmp/
+jm_output/
+models/
+douyin_cookies.txt
+last_analysis.json
+*.gguf
+*.exe
+Modelfile
+gist_screenshot.png
+*.log
