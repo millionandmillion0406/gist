@@ -216,8 +216,15 @@ def extract_note(url):
     try:
         rc, out, _ = sh([pw_py, str(note_py), url], timeout=60)
         if rc != 0: return "⚠ 提取失败"
-        for line in out.split("\n"):
+        lines = out.split("\n")
+        for i, line in enumerate(lines):
             if line.startswith("📝 图文内容："):
+                # 内容在下一行
+                if i + 1 < len(lines):
+                    content = lines[i + 1].strip()
+                    # 去掉 markdown 标记
+                    content = content.replace("**", "").replace("## ", "")
+                    return content[:500]
                 return line[len("📝 图文内容："):].strip()
         # 尝试从输出中找正文
         lines = [l for l in out.split("\n") if len(l) > 20 and "界面" not in l[:8]]

@@ -62,18 +62,32 @@ async def main():
                 print("  提示：在 Chrome 中登录抖音后重试", flush=True)
                 return
 
-            # 直接截图整个页面，OCR 读内容
-            await asyncio.sleep(3)
-            img = WORK_DIR / "page.png"
-            await page.screenshot(path=str(img), full_page=True)
+            # 从页面直接提取正文文字
+            text = await page.evaluate("""() => {
+                // 尝试多种选择器找正文
+                const selectors = ['article', '[class*="content"]', '[class*="text"]', 'main', '.note-text', '[class*="article"]'];
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el && el.textContent.length > 50) return el.textContent;
+                }
+                // 兜底：取页面可见文本
+                const body = document.body;
+                const clone = body.cloneNode(true);
+                // 移除脚本、样式等
+                clone.querySelectorAll('script,style,nav,header,footer,[class*="nav"],[class*="header"],[class*="footer"]').forEach(e => e.remove());
+                return clone.textContent.replace(/\\s+/g, ' ').trim();
+            }""") or ""
 
-            text = auto_ocr(img) or ""
-            lines = text.split("。")
-            content = [l for l in lines if len(l) > 15 and "界面" not in l[:10] and "按钮" not in l[:10] and "图标" not in l[:10]]
-            if content:
-                print(f"\n📝 图文内容：\n" + "。\n".join(content[:5]), flush=True)
-            else:
+            if text and len(text) > 50:
                 print(f"\n📝 图文内容：\n{text[:500]}", flush=True)
+            else:
+                # 兜底：截图 OCR
+                img = WORK_DIR / "page.png"
+                await page.screenshot(path=str(img), full_page=True)
+                ocr_text = auto_ocr(img) or ""
+                lines = ocr_text.split("\n")
+                content = [l for l in lines if len(l) > 15 and not any(k in l for k in ["界面", "按钮", "图标", "布局", "截图", "导航"])]
+                print(f"\n📝 图文内容：\n" + "\n".join(content[:5]) if content else ocr_text[:300], flush=True)
 
         finally:
             await to_close.close()
