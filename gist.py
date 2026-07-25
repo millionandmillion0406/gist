@@ -69,7 +69,11 @@ print(r[0]['text'])
 """
         rc, out, _ = sh([PY, "-c", code], timeout=1800)
         if rc == 0 and out.strip():
-            return out.strip().replace(" ", "")
+            # 清理 FunASR 进度输出，只保留中文文本
+            lines = out.strip().split('
+')
+            text = ' '.join(l for l in lines if not l.startswith('Download') and not l.startswith('Processing') and not l.startswith('funasr') and l.strip())
+            return text.replace(" ", "").strip()[:2000]
 
     print("🎤 听写中（Whisper）...", flush=True)
     code = f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{audio_path}',language='zh',verbose=False); print(r['text'])"

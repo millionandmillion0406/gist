@@ -32,7 +32,7 @@ async def main():
         # 1. 提取页面中的图片 URL
         img_urls = await page.evaluate("""() => {
             const imgs = document.querySelectorAll('img');
-            return [...imgs].map(i => i.src).filter(s => s && s.match(/https?:\/\//)).slice(0, 20);
+            return [...imgs].map(i => i.src).filter(s => s && s.match(s => s.startsWith('http'))).slice(0, 20);
         }""")
         
         texts = []
