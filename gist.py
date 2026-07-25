@@ -51,10 +51,27 @@ def download(url):
     return audio
 
 
-# ── 2. 转录 ──
+# ── 2. 转录（FunASR + Whisper 兜底）──
+
+HAS_FUNASR = subprocess.run([PY, "-m", "pip", "show", "funasr"],
+    capture_output=True, timeout=10).returncode == 0
 
 def transcribe(audio_path):
-    print("🎤 听写中...", flush=True)
+    """优先 FunASR（中文更准），没有则用 Whisper"""
+    if HAS_FUNASR:
+        print("🎤 听写中（FunASR）...", flush=True)
+        code = f"""
+from funasr import AutoModel
+model = AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
+    disable_update=True, disable_progress=True)
+r = model.generate(input=r'{audio_path}')
+print(r[0]['text'])
+"""
+        rc, out, _ = sh([PY, "-c", code], timeout=1800)
+        if rc == 0 and out.strip():
+            return out.strip().replace(" ", "")
+
+    print("🎤 听写中（Whisper）...", flush=True)
     code = f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{audio_path}',language='zh',verbose=False); print(r['text'])"
     rc, out, _ = sh([PY, "-c", code], timeout=1800)
     return out.strip() if rc == 0 else ""
