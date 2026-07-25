@@ -102,7 +102,7 @@ def analyze_frame(frame_path, local_model=None):
             headers={"Content-Type": "application/json"})
         try:
             resp = json.loads(urllib.request.urlopen(req, timeout=120).read())
-            desc = resp.get("response", "").strip()[:300]
+            desc = resp.get("response", "").strip()
             if desc: return desc
         except: pass
 
@@ -115,7 +115,7 @@ def analyze_frame(frame_path, local_model=None):
         r2 = subprocess.run([PY, str(AUTOGLM_SKILL_DIR / "image-recognition.py"), url],
             capture_output=True, text=True, timeout=30)
         if r2.returncode != 0: return ""
-        return json.loads(r2.stdout)["data"]["text"][:300]
+        return json.loads(r2.stdout)["data"]["text"]
     except:
         return ""
 
@@ -374,7 +374,7 @@ def main():
         print(f"  gist 完成 ⏱ {elapsed}")
         if vision:
             for v in vision:
-                print(f"  👁️ [{v['time']}] {v['desc'][:200]}")
+                print(f"  👁️ [{v['time']}] {v['desc']}")
         print(f"{'='*50}\n{analysis}\n{'='*50}\n  来聊这个视频 👊\n{'='*50}")
 
 
