@@ -190,29 +190,103 @@ print(json.dumps(scenes))
     return results
 
 
-# ── 4. AI 蒸馏 ──
+# ── 4. AI 蒸馏（3 提取器并行）──
+
+def llm_call(prompt, max_tokens=2048):
+    """调 DeepSeek API"""
+    data = json.dumps({"model": "deepseek-v4-flash", "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}).encode()
+    req = urllib.request.Request(DEEPSEEK_URL, data=data,
+        headers={"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"})
+    try:
+        resp = json.loads(urllib.request.urlopen(req, timeout=60).read())
+        return resp["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f""
+
 
 def distill(transcript, vision=None):
     if not transcript.strip():
         return "⚠ 未检测到语音内容"
-    print("🧠 AI 分析中...", flush=True)
+    print("🧠 AI 分析中（3 提取器并行）...", flush=True)
 
     vis = ""
     if vision:
         vis = "\n画面内容：\n" + "\n".join([f"[{v['time']}] {v['desc']}" for v in vision])
 
-    prompt = f"""你是一个视频内容蒸馏助手。下面是一段视频的语音识别结果{vis}。
-请：1.纠错 2.提取结构化内容（模型/框架、原则、案例、边界、步骤、主题）
-识别结果：
-{transcript}{vis}"""
+    # 3 个并行提取器
+    prompts = {
+        "corrector": f"""你是视频内容纠错助手。下面是一段语音识别结果，请做两件事：
+1. 修正错别字和不通顺的地方，保留口语气质
+2. 用一句话概括核心主题
 
-    data = json.dumps({"model": "deepseek-v4-flash", "messages": [{"role": "user", "content": prompt}], "max_tokens": 4096}).encode()
-    req = urllib.request.Request(DEEPSEEK_URL, data=data,
-        headers={"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"})
-    try:
-        return json.loads(urllib.request.urlopen(req, timeout=60).read())["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"⚠ AI分析失败: {e}\n\n{transcript}"
+识别结果：
+{transcript}{vis}
+
+输出格式：
+## 📌 核心主题
+[一句话]
+
+## 📝 校正全文
+[纠错后的文本]""",
+
+        "framework": f"""你是视频分析专家。从下面这段视频内容中，提取：
+1. 🧠 思维模型/框架 — 用的什么思考方法、决策框架
+2. 📏 原则/规则 — 明确提出的"应该/不应该"的断言
+
+没有就不写，不要编。
+
+内容：
+{transcript}{vis}
+
+输出格式：
+## 🧠 思维模型/框架
+- ...
+## 📏 原则/规则
+- ...""",
+
+        "insight": f"""你是视频内容拆解专家。从下面这段视频内容中，提取：
+1. 📖 案例 — 提到的具体例子
+2. ⚠️ 边界/注意 — 限制条件、容易出错的地方
+3. 💡 可执行步骤 — 可以直接照着做的操作流程
+
+没有就不写，不要编。
+
+内容：
+{transcript}{vis}
+
+输出格式：
+## 📖 案例
+- ...
+## ⚠️ 边界/注意
+- ...
+## 💡 可执行步骤
+- ...""",
+    }
+
+    # 并行调用
+    import threading
+    results = {}
+
+    def worker(name, prompt):
+        results[name] = llm_call(prompt)
+
+    threads = []
+    for name, prompt in prompts.items():
+        t = threading.Thread(target=worker, args=(name, prompt))
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
+
+    # 合并结果
+    output = []
+    for name in ["corrector", "framework", "insight"]:
+        if results.get(name):
+            output.append(results[name])
+
+    final = "\n\n".join(output) if output else transcript
+    return final
 
 
 # ── 主流程 ──
