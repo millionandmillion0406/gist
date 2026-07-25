@@ -1,38 +1,49 @@
 ---
 name: gist
-description: 扔视频链接，AI自动分析、总结拆解，然后你和AI一起交流学习。
+description: 从任何视频链接中提取结构化知识。用户扔链接 → 你分析 → 讨论。
 ---
 
-# gist: 和 AI 一起从视频中学
+# gist — 和 AI 一起从视频中学
 
-用户扔视频链接 → 你跑 gist → 一起讨论
+用户给你一个链接时，按这个流程走。
 
-## 一条命令
+## 怎么装
 
 ```bash
-python gist.py <链接>
-python gist.py <链接> --vision   # 加画面分析
+pip install yt-dlp openai-whisper torch funasr
+winget install ffmpeg
 ```
 
-## 管线
+有 AI 帮我装就行，不用用户操心。
 
-下载（yt-dlp）→ 转录（FunASR/Whisper）→ 视觉分析（可选）→ AI蒸馏（3提取器并行）→ 讨论
+## 怎么用
 
-## 在哪
-
-```
-C:\Users\windows\ZCodeProject\video-qa\
-├── gist.py       ← 主程序
-├── douyin_note.py ← 抖音图文提取
-├── douyin_login.py ← 抖音登录脚本
-├── README.md     ← 给人看的说明
-└── SKILL.md      ← 给你看的说明
+```bash
+cd <gist目录>
+python gist.py "<用户给的链接>"
 ```
 
-## 参考项目
+输出保存在 `last_analysis.json`，你自己读一下，然后和用户讨论内容。
 
-- VideoContextEngine — 场景检测
-- cangjie-skill — 多提取器蒸馏
-- FunASR — 阿里通义中文语音识别
-- yt-dlp — 视频下载
-- jiji262/douyin-downloader — 抖音登录
+输出结构：
+- 📌 核心主题 — 一句话概括
+- 📝 校正全文 — 纠错后的文本
+- 🧠 思维模型/框架 — 可迁移的思考结构
+- 📏 原则/规则 — 可以直接用的判断标准
+- 📖 案例 — 实际操作经验
+- ⚠️ 边界/注意 — 容易翻车的地方
+- 💡 可执行步骤 — 能照着做的
+
+## 可选功能
+
+| 功能 | 命令 | 需要装 |
+|:-----|:-----|:-------|
+| 画面分析 | `--vision` | `ollama pull llava:7b` |
+| 抖音图文 | `python douyin_note.py <链接>` | `pip install playwright` + `playwright install chromium` |
+| 抖音登录 | `python douyin_login.py` | 扫码登录（仅需一次） |
+
+## 原理
+
+```
+链接 → yt-dlp（1200+站）→ 音频 → FunASR/Whisper → 3提取器蒸馏 → 你俩聊
+```
