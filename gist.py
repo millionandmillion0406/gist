@@ -227,7 +227,7 @@ def extract_note(url):
     note_py = Path(__file__).parent / "douyin_note.py"
     # 用能找到的最佳 Python
     note_py_python = PY
-    for c in [PY, "python3", "python", r"C:\Users\windows\AppData\Local\Programs\Python\Python312\python.exe"]:
+    for c in [PY, "python3", "python"]:
         if subprocess.run([c, "-c", "import easyocr"], capture_output=True).returncode == 0:
             note_py_python = c
             break
