@@ -4,7 +4,11 @@ import asyncio, json, os, sys, subprocess, re
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-AUTOGLM = Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition")
+AUTOGLM_CANDIDATES = [
+    Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition"),
+    Path.home() / ".openclaw-autoclaw/skills/autoglm-image-recognition",
+]
+AUTOGLM = next((p for p in AUTOGLM_CANDIDATES if p.exists()), None)
 WORK_DIR = Path(__file__).parent / "tmp"
 WORK_DIR.mkdir(exist_ok=True)
 COOKIES_JSON = Path(__file__).parent.parent / "douyin-downloader" / "config" / "cookies.json"

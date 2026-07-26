@@ -11,12 +11,16 @@ from pathlib import Path
 WORK_DIR = Path(__file__).parent / "tmp"
 WORK_DIR.mkdir(exist_ok=True)
 COOKIES = Path(__file__).parent / "douyin_cookies.txt"
-DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY") or "sk-9a32ad9e076e4af48cb6d8b42e539c93"
+DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY")
+if not DEEPSEEK_KEY:
+    print("⚠ 请设置环境变量 DEEPSEEK_API_KEY", flush=True)
+    print("   export DEEPSEEK_API_KEY='your-key'", flush=True)
+    sys.exit(1)
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
-# 找 Python
+# 找 Python（自动检测）
 PY = sys.executable
-for c in [sys.executable, r"C:\Users\windows\AppData\Local\Programs\Python\Python312\python.exe"]:
+for c in [sys.executable, "python3", "python"]:
     if subprocess.run([c, "-c", "import whisper"], capture_output=True).returncode == 0:
         PY = c; break
 
@@ -82,7 +86,16 @@ print(r[0]['text'])
 
 # ── 3. 视觉分析（自动选择引擎）──
 
-AUTOGLM_SKILL_DIR = Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition")
+# AutoGLM 路径自动检测
+AUTOGLM_CANDIDATES = [
+    Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition"),
+    Path.home() / ".openclaw-autoclaw/skills/autoglm-image-recognition",
+]
+AUTOGLM_SKILL_DIR = None
+for p in AUTOGLM_CANDIDATES:
+    if p.exists():
+        AUTOGLM_SKILL_DIR = p
+        break
 
 def has_local_vision():
     """检查本地是否有可用的视觉模型"""
