@@ -18,9 +18,9 @@ if not DEEPSEEK_KEY:
     sys.exit(1)
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
-# 找 Python（自动检测，优先 3.12）
+# 找 Python（自动检测所有版本）
 PY = sys.executable
-for c in [sys.executable, "python3", "python", r"C:\Users\windows\AppData\Local\Programs\Python\Python312\python.exe"]:
+for c in [sys.executable, "python3", "python"]:
     if subprocess.run([c, "-c", "import whisper"], capture_output=True).returncode == 0:
         PY = c; break
 
@@ -225,9 +225,14 @@ def llm_call(prompt, max_tokens=2048):
 def extract_note(url):
     """调用 douyin_note.py 提取图文"""
     note_py = Path(__file__).parent / "douyin_note.py"
-    pw_py = r"C:\Users\windows\AppData\Local\Programs\Python\Python312\python.exe"
+    # 用能找到的最佳 Python
+    note_py_python = PY
+    for c in [PY, "python3", "python", r"C:\Users\windows\AppData\Local\Programs\Python\Python312\python.exe"]:
+        if subprocess.run([c, "-c", "import easyocr"], capture_output=True).returncode == 0:
+            note_py_python = c
+            break
     try:
-        rc, out, _ = sh([pw_py, str(note_py), url], timeout=60)
+        rc, out, _ = sh([note_py_python, str(note_py), url], timeout=60)
         if rc != 0: return "⚠ 提取失败"
         lines = out.split("\n")
         for i, line in enumerate(lines):
