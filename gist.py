@@ -57,7 +57,7 @@ def download(url):
 
 # ── 2. 转录（FunASR + Whisper 兜底）──
 
-HAS_FUNASR = subprocess.run([PY, "-m", "pip", "show", "funasr"],
+HAS_FUNASR = subprocess.run([PY, "-c", "from funasr import AutoModel; print('ok')"],
     capture_output=True, timeout=10).returncode == 0
 
 def transcribe(audio_path):
