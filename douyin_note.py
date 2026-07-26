@@ -1,99 +1,84 @@
 #!/usr/bin/env python3
-"""抖音图文内容提取 — 优先用 Chrome 登录态，没有则用 cookies"""
-import asyncio, json, os, sys, subprocess, re
+"""抖音图文提取：自动翻页 + EasyOCR 读文字，给所有人用"""
+import asyncio, json, os, sys, subprocess
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-AUTOGLM_CANDIDATES = [
-    Path.home() / ".openclaw-autoclaw/skills/autoglm-image-recognition",
-    Path.home() / ".openclaw/skills/autoglm-image-recognition",
-]
-AUTOGLM = next((p for p in AUTOGLM_CANDIDATES if p.exists()), None)
+try:
+    import easyocr
+    READER = easyocr.Reader(["ch_sim", "en"], gpu=False, verbose=False)
+except:
+    READER = None
+
 WORK_DIR = Path(__file__).parent / "tmp"
 WORK_DIR.mkdir(exist_ok=True)
 COOKIES_JSON = Path(__file__).parent.parent / "douyin-downloader" / "config" / "cookies.json"
 
 
-def auto_ocr(img_path):
-    r = subprocess.run([sys.executable, str(AUTOGLM / "upload-mix.py"), str(img_path)],
-        capture_output=True, text=True, timeout=30)
-    if r.returncode != 0: return ""
-    url = json.loads(r.stdout)["data"]["oss_info"][0]["oss_url"]
-    r2 = subprocess.run([sys.executable, str(AUTOGLM / "image-recognition.py"), url],
-        capture_output=True, text=True, timeout=30)
-    if r2.returncode != 0: return ""
-    return json.loads(r2.stdout)["data"]["text"]
+def ocr_image(img_path):
+    """EasyOCR 读图，返回文本列表"""
+    if not READER:
+        return []
+    from PIL import Image
+    import numpy as np
+    img = Image.open(img_path)
+    results = READER.readtext(np.array(img)[:, :, ::-1], detail=0, paragraph=True)
+    return [r for r in results if len(r) > 5]
 
 
 async def main():
     url = sys.argv[1] if len(sys.argv) > 1 else ""
-    if not url: print("⚠ 请提供链接", flush=True); return
+    if not url:
+        print("⚠ 请提供抖音图文链接"); return
 
-    print(f"📖 打开图文...", flush=True)
+    print("📖 打开图文...", flush=True)
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context()
-        to_close = browser
 
-        # 从 json cookies 设置登录态
+        # 尝试加载 cookies
         if COOKIES_JSON.exists():
             try:
                 cd = json.loads(COOKIES_JSON.read_text())
-                douyin_cookies = []
-                for k, v in cd.items():
-                    douyin_cookies.append({"name": k, "value": v, "domain": ".douyin.com", "path": "/"})
-                    douyin_cookies.append({"name": k, "value": v, "domain": ".amemv.com", "path": "/"})
-                await ctx.add_cookies(douyin_cookies)
-            except Exception as e:
-                print(f"  ⚠ cookies 加载失败: {e}", flush=True)
+                await ctx.add_cookies([{"name":k,"value":v,"domain":".douyin.com","path":"/"} for k,v in cd.items()])
+            except: pass
 
         page = await ctx.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(4)
 
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(4)
+        title = await page.title()
+        print(f"  标题: {title}", flush=True)
 
-            title = await page.title()
-            print(f"  页面标题: {title}", flush=True)
+        # 翻页遍历所有图片
+        all_texts = set()
+        w, h = 1280, 900
 
-            # 截图检测是否登录墙
-            full_img = WORK_DIR / "full.png"
-            await page.screenshot(path=str(full_img))
-            ocr_text = auto_ocr(full_img) or ""
+        for i in range(6):  # 最多 6 页
+            screenshot = WORK_DIR / f"p{i}.png"
+            await page.screenshot(path=str(screenshot))
 
-            if "登录" in title and ("注册" in title or "密码" in title):
-                print("  ❌ 需要登录抖音后才能查看", flush=True)
-                print("  提示：在 Chrome 中登录抖音后重试", flush=True)
-                return
+            texts = ocr_image(screenshot)
+            new_texts = [t for t in texts if t not in all_texts]
+            if new_texts:
+                all_texts.update(new_texts)
+                # 过滤 UI 文字
+                useful = [t for t in new_texts if not any(k in t[:15] for k in ["登录","扫码","验证码","手机号","下载客户端","协议","隐私"]) and len(t) > 10]
+                if useful:
+                    print(f"\n📄 第 {len(all_texts)} 页内容:", flush=True)
+                    for t in useful:
+                        print(f"  {t[:100]}", flush=True)
 
-            # 从页面直接提取正文文字
-            text = await page.evaluate("""() => {
-                // 尝试多种选择器找正文
-                const selectors = ['article', '[class*="content"]', '[class*="text"]', 'main', '.note-text', '[class*="article"]'];
-                for (const sel of selectors) {
-                    const el = document.querySelector(sel);
-                    if (el && el.textContent.length > 50) return el.textContent;
-                }
-                // 兜底：取页面可见文本
-                const body = document.body;
-                const clone = body.cloneNode(true);
-                // 移除脚本、样式等
-                clone.querySelectorAll('script,style,nav,header,footer,[class*="nav"],[class*="header"],[class*="footer"]').forEach(e => e.remove());
-                return clone.textContent.replace(/\\s+/g, ' ').trim();
-            }""") or ""
+            # 滑动到下一张
+            await page.mouse.move(w // 2 + 200, h // 2)
+            await page.mouse.down()
+            await page.mouse.move(w // 2 - 300, h // 2)
+            await page.mouse.up()
+            await asyncio.sleep(2)
 
-            if text and len(text) > 50:
-                print(f"\n📝 图文内容：\n{text[:500]}", flush=True)
-            else:
-                # 兜底：截图 OCR
-                img = WORK_DIR / "page.png"
-                await page.screenshot(path=str(img), full_page=True)
-                ocr_text = auto_ocr(img) or ""
-                lines = ocr_text.split("\n")
-                content = [l for l in lines if len(l) > 15 and not any(k in l for k in ["界面", "按钮", "图标", "布局", "截图", "导航"])]
-                print(f"\n📝 图文内容：\n" + "\n".join(content[:5]) if content else ocr_text[:300], flush=True)
+        if not all_texts:
+            print("\n⚠ 未能提取到内容（可能需要登录抖音）", flush=True)
 
-        finally:
-            await to_close.close()
+        await browser.close()
 
 asyncio.run(main())
