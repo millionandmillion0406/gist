@@ -1,49 +1,66 @@
 ---
 name: gist
-description: 从任何视频链接中提取结构化知识。用户扔链接 → 你分析 → 讨论。
+description: >
+  扔视频/图文链接，自动分析、总结拆解、提取可复用知识。
+  支持 1200+ 平台：B站、抖音、YouTube、小红书、快手……
+  任何 AI Agent 都能用（Claude Code、Codex、ZCode、OpenClaw、Cursor）。
 ---
 
 # gist — 和 AI 一起从视频中学
 
-用户给你一个链接时，按这个流程走。
+用户给你一个视频链接时，按这个流程走。
 
-## 怎么装
+## 安装
 
 ```bash
+# 克隆
+git clone https://github.com/millionandmillion0406/gist.git ~/gist
+cd ~/gist
+
+# 装依赖
 pip install yt-dlp openai-whisper torch funasr
-winget install ffmpeg
+winget install ffmpeg          # Windows
+# brew install ffmpeg          # Mac
+
+# 可选：画面分析（--vision）
+# ollama pull llava:7b
 ```
 
-有 AI 帮我装就行，不用用户操心。
-
-## 怎么用
+## 用法
 
 ```bash
-cd <gist目录>
-python gist.py "<用户给的链接>"
+# 视频/音频分析
+python gist.py <视频链接>
+
+# 加画面分析
+python gist.py <视频链接> --vision
+
+# 抖音图文
+python gist.py <抖音图文链接> --note
 ```
 
-输出保存在 `last_analysis.json`，你自己读一下，然后和用户讨论内容。
+## 输出
 
-输出结构：
-- 📌 核心主题 — 一句话概括
-- 📝 校正全文 — 纠错后的文本
-- 🧠 思维模型/框架 — 可迁移的思考结构
-- 📏 原则/规则 — 可以直接用的判断标准
-- 📖 案例 — 实际操作经验
-- ⚠️ 边界/注意 — 容易翻车的地方
-- 💡 可执行步骤 — 能照着做的
+运行后自动保存到 `last_analysis.json`，同时打印结构化分析：
+- 核心主题 / 校正全文
+- 思维模型/框架 / 原则规则
+- 案例 / 边界注意 / 可执行步骤
 
-## 可选功能
+你自己读一下，然后和用户讨论内容。
 
-| 功能 | 命令 | 需要装 |
-|:-----|:-----|:-------|
-| 画面分析 | `--vision` | `ollama pull llava:7b` |
-| 抖音图文 | `python douyin_note.py <链接>` | `pip install playwright` + `playwright install chromium` |
-| 抖音登录 | `python douyin_login.py` | 扫码登录（仅需一次） |
+## 依赖清单
 
-## 原理
+| 工具 | 用途 | 获取 |
+|:-----|:-----|:------|
+| yt-dlp | 视频下载 | pip install yt-dlp |
+| FunASR | 中文语音识别 | pip install funasr |
+| openai-whisper | 语音识别（兜底）| pip install openai-whisper torch |
+| ffmpeg | 音视频处理 | winget/brew install |
+| playwright | 抖音图文提取（--note）| pip install playwright + playwright install chromium |
 
-```
-链接 → yt-dlp（1200+站）→ 音频 → FunASR/Whisper → 3提取器蒸馏 → 你俩聊
-```
+## 参考
+
+- VideoContextEngine — 场景检测
+- cangjie-skill — 结构化蒸馏方法论
+- FunASR — 阿里通义中文语音识别
+- yt-dlp — 视频下载引擎
