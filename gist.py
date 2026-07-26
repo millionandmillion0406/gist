@@ -88,8 +88,8 @@ print(r[0]['text'])
 
 # AutoGLM 路径自动检测
 AUTOGLM_CANDIDATES = [
-    Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition"),
     Path.home() / ".openclaw-autoclaw/skills/autoglm-image-recognition",
+    Path.home() / ".openclaw/skills/autoglm-image-recognition",
 ]
 AUTOGLM_SKILL_DIR = None
 for p in AUTOGLM_CANDIDATES:

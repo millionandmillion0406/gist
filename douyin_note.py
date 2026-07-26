@@ -5,8 +5,8 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 AUTOGLM_CANDIDATES = [
-    Path("C:/Users/windows/.openclaw-autoclaw/skills/autoglm-image-recognition"),
     Path.home() / ".openclaw-autoclaw/skills/autoglm-image-recognition",
+    Path.home() / ".openclaw/skills/autoglm-image-recognition",
 ]
 AUTOGLM = next((p for p in AUTOGLM_CANDIDATES if p.exists()), None)
 WORK_DIR = Path(__file__).parent / "tmp"
