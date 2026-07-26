@@ -1,6 +1,10 @@
 ---
 name: gist
-description: 扔视频/图文链接，自动分析、总结拆解、提取可复用知识。支持1200+平台。任何AI Agent都能用。
+description: >
+  AI视频分析工具：扔链接，自动转录、总结、提取结构化知识。
+  支持1200+平台（B站、抖音、YouTube、小红书…）。
+  任何AI Agent都能用（Claude Code、Codex、ZCode、OpenClaw、Cursor）。
+  关键词：视频转文字、内容蒸馏、知识提取、AI Agent技能。
 ---
 
 # gist — 和 AI 一起从视频中学
