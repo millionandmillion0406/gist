@@ -1,66 +1,63 @@
 ---
 name: gist
-description: >
-  扔视频/图文链接，自动分析、总结拆解、提取可复用知识。
-  支持 1200+ 平台：B站、抖音、YouTube、小红书、快手……
-  任何 AI Agent 都能用（Claude Code、Codex、ZCode、OpenClaw、Cursor）。
+description: 扔视频/图文链接，自动分析、总结拆解、提取可复用知识。支持1200+平台。任何AI Agent都能用。
 ---
 
 # gist — 和 AI 一起从视频中学
 
-用户给你一个视频链接时，按这个流程走。
+用户给你视频链接时，你做三件事：**跑 gist → 读结果 → 跟用户聊**
 
-## 安装
+## 0. 首次使用：装依赖
 
 ```bash
-# 克隆
-git clone https://github.com/millionandmillion0406/gist.git ~/gist
-cd ~/gist
-
-# 装依赖
+cd <gist目录>
 pip install yt-dlp openai-whisper torch funasr
-winget install ffmpeg          # Windows
-# brew install ffmpeg          # Mac
-
-# 可选：画面分析（--vision）
-# ollama pull llava:7b
+# 确保 ffmpeg 已安装（winget install ffmpeg）
 ```
 
-## 用法
+## 1. 跑 gist
 
 ```bash
-# 视频/音频分析
-python gist.py <视频链接>
-
-# 加画面分析
-python gist.py <视频链接> --vision
-
-# 抖音图文
-python gist.py <抖音图文链接> --note
+python gist.py "<用户给的链接>"
 ```
 
-## 输出
+会自动：
+- 下载音频 → FunASR/Whisper 转文字
+- （可选 --vision）场景检测 + 视觉分析
+- DeepSeek AI 结构化蒸馏
 
-运行后自动保存到 `last_analysis.json`，同时打印结构化分析：
-- 核心主题 / 校正全文
-- 思维模型/框架 / 原则规则
-- 案例 / 边界注意 / 可执行步骤
+输出保存到 `last_analysis.json`，同时打印到终端。
 
-你自己读一下，然后和用户讨论内容。
+## 2. 读结果
 
-## 依赖清单
+输出结构：
+- 📌 核心主题 — 一句话概括
+- 📝 校正全文 — 纠错后的文本
+- 🧠 思维模型/框架 — 可迁移的思考结构
+- 📏 原则/规则 — 可以直接用的判断标准
+- 📖 案例 — 实际操作经验
+- ⚠️ 边界/注意 — 容易翻车的地方
+- 💡 可执行步骤 — 能照着做的
 
-| 工具 | 用途 | 获取 |
+## 3. 跟用户聊
+
+不要只丢文本。主动分析、提问、联系已有知识。
+
+好的交流方式：
+- 先给一个一句话概括
+- 再问用户想深入了解哪个点
+- 或者直接提出你的观察和疑问
+
+## 可选参数
+
+| 参数 | 用途 | 需要 |
 |:-----|:-----|:------|
-| yt-dlp | 视频下载 | pip install yt-dlp |
-| FunASR | 中文语音识别 | pip install funasr |
-| openai-whisper | 语音识别（兜底）| pip install openai-whisper torch |
-| ffmpeg | 音视频处理 | winget/brew install |
-| playwright | 抖音图文提取（--note）| pip install playwright + playwright install chromium |
+| `--vision` | 分析画面内容 | `ollama pull llava:7b` |
+| `--note` | 抖音图文模式 | `pip install playwright` |
+| `--json` | JSON 格式输出 | 无 |
 
-## 参考
+## 原理
 
-- VideoContextEngine — 场景检测
-- cangjie-skill — 结构化蒸馏方法论
-- FunASR — 阿里通义中文语音识别
-- yt-dlp — 视频下载引擎
+```
+链接 → yt-dlp（1200+站）→ 音频 → FunASR/Whisper → DeepSeek AI → 结构化分析 → 你俩聊
+```
