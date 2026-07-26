@@ -18,11 +18,24 @@ if not DEEPSEEK_KEY:
     sys.exit(1)
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
-# 找 Python（自动检测所有版本）
+# 找 Python（搜索所有可用版本）
 PY = sys.executable
-for c in [sys.executable, "python3", "python"]:
-    if subprocess.run([c, "-c", "import whisper"], capture_output=True).returncode == 0:
+candidates = [sys.executable, "python3", "python"]
+for p in [Path("C:/Users/windows/AppData/Local/Programs/Python"), Path("/c/Users/windows/AppData/Local/Programs/Python")]:
+    if p.exists():
+        for ver in sorted(p.iterdir(), reverse=True):
+            candidates.append(str(ver / "python.exe"))
+
+seen = set()
+for c in candidates:
+    if not c or c in seen: continue
+    seen.add(c)
+    if subprocess.run([c, "-c", "import whisper"], capture_output=True, timeout=10).returncode == 0:
         PY = c; break
+        PY = c; break
+    # 再看有没有 Whisper（兜底）
+    if subprocess.run([c, "-c", "import whisper"], capture_output=True, timeout=10).returncode == 0:
+        PY = c
 
 AUTOGLM_APP_ID = "100003"
 AUTOGLM_APP_KEY = "38d2391985e2369a5fb8227d8e6cd5e5"
@@ -57,7 +70,7 @@ def download(url):
 
 # ── 2. 转录（FunASR + Whisper 兜底）──
 
-HAS_FUNASR = subprocess.run([PY, "-c", "from funasr import AutoModel; print('ok')"],
+HAS_FUNASR = subprocess.run([PY, "-m", "pip", "show", "funasr"],
     capture_output=True, timeout=10).returncode == 0
 
 def transcribe(audio_path):
@@ -68,7 +81,7 @@ def transcribe(audio_path):
 from funasr import AutoModel
 model = AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
     disable_update=True, disable_progress=True)
-r = model.generate(input=r'{audio_path}')
+r = model.generate(input=r'{audio_path.resolve()}')
 print(r[0]['text'])
 """
         rc, out, _ = sh([PY, "-c", code], timeout=1800)
@@ -79,7 +92,7 @@ print(r[0]['text'])
             return text.replace(" ", "").strip()
 
     print("🎤 听写中（Whisper）...", flush=True)
-    code = f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{audio_path}',language='zh',verbose=False); print(r['text'])"
+    code = f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{audio_path.resolve()}',language='zh',verbose=False); print(r['text'])"
     rc, out, _ = sh([PY, "-c", code], timeout=1800)
     return out.strip() if rc == 0 else ""
 
