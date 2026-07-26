@@ -50,22 +50,27 @@ async def main():
         title = await page.title()
         print(f"  标题: {title}", flush=True)
 
-        # 翻页遍历所有图片
+        # 翻页遍历所有图片，直到没有新内容
         all_texts = set()
+        empty_count = 0
         w, h = 1280, 900
 
-        for i in range(6):  # 最多 6 页
+        for i in range(20):  # 最多 20 页（安全上限）
             screenshot = WORK_DIR / f"p{i}.png"
             await page.screenshot(path=str(screenshot))
 
             texts = ocr_image(screenshot)
             new_texts = [t for t in texts if t not in all_texts]
-            if new_texts:
+            if not new_texts:
+                empty_count += 1
+                if empty_count >= 2:  # 连续 2 页无新内容就停止
+                    break
+            else:
+                empty_count = 0
                 all_texts.update(new_texts)
-                # 过滤 UI 文字
                 useful = [t for t in new_texts if not any(k in t[:15] for k in ["登录","扫码","验证码","手机号","下载客户端","协议","隐私"]) and len(t) > 10]
                 if useful:
-                    print(f"\n📄 第 {len(all_texts)} 页内容:", flush=True)
+                    print(f"\n📄 图片 {len([t for t in all_texts if len(t) > 10])}:", flush=True)
                     for t in useful:
                         print(f"  {t[:100]}", flush=True)
 
