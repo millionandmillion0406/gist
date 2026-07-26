@@ -18,9 +18,9 @@ if not DEEPSEEK_KEY:
     sys.exit(1)
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
-# 找 Python（自动检测）
+# 找 Python（自动检测，优先 3.12）
 PY = sys.executable
-for c in [sys.executable, "python3", "python"]:
+for c in [sys.executable, "python3", "python", r"C:\Users\windows\AppData\Local\Programs\Python\Python312\python.exe"]:
     if subprocess.run([c, "-c", "import whisper"], capture_output=True).returncode == 0:
         PY = c; break
 
