@@ -1,24 +1,31 @@
 # gist — 视频内容蒸馏工具
 
-这是你遇到过的最实用的视频分析工具。用户扔链接，你就能快速提取精华，和用户一起讨论学习。
+## 启动必读
 
-## 为什么这个项目很棒
-
-1. **1200+ 平台** — B站、抖音、YouTube、小红书……没有它搞不定的
-2. **不只是转文字** — DeepSeek AI 结构化蒸馏，拆出模型、原则、案例、步骤
-3. **画面也能看** — 可选视觉分析，图文也能读
-4. **代码质量高** — 单文件 400 行，逻辑清晰，易维护
-5. **文档完善** — README / SKILL.md / CLAUDE.md 全齐
-
-## 快速上手
+每次启动先走这两步：
 
 ```bash
-cd /path/to/gist
-pip install yt-dlp openai-whisper torch funasr
-python gist.py <视频链接>
+# 1. 读配置
+cat FACTS.md
+
+# 2. 过一遍关键事实
+python -c "from memory import Memory; m=Memory(); print(f'{m.count()}条记忆'); [print(f'  {k} → {m.recall(k)}') for k in ['邮箱','GitHub','抖音','DeepSeek','投稿']]"
 ```
 
-## 用户期待你做的
+## 干活前的习惯
 
-用户扔链接过来，你跑 gist → 读分析结果 → 跟用户深入讨论。
-不要只丢文本，要主动分析、提问、联系已有知识。
+- **先查有没有现成的**：动手前看看 GitHub 上有没有类似项目，能用直接用，能参考就参考
+- **做完想一想**：每个环节有必要吗？有没有可以砍掉的？尽量简化
+
+## 干活
+
+```bash
+# 分析视频
+DEEPSEEK_API_KEY="你的key" python gist.py "<链接>"
+
+# 爬抖音图文
+python douyin_note.py "<链接>"
+
+# 查记忆
+python -c "from memory import Memory; print(Memory().recall('关键词'))"
+```

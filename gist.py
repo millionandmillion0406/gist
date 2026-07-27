@@ -1,371 +1,180 @@
 #!/usr/bin/env python3
-"""
-gist — 扔视频链接，AI自动分析、总结拆解、然后和你交流。
-
-流程：下载 → 转录 → 场景检测 → 视觉分析 → AI蒸馏 → 讨论
-"""
-
-import argparse, hashlib, json, mimetypes, os, subprocess, sys, time, urllib.request, uuid
+"""gist — 视频链接扔进来，下载→转录→AI分析"""
+import argparse, json, os, subprocess, sys, time, urllib.request, shutil
 from pathlib import Path
 
-WORK_DIR = Path(__file__).parent / "tmp"
-WORK_DIR.mkdir(exist_ok=True)
-COOKIES = Path(__file__).parent / "douyin_cookies.txt"
-DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY")
-if not DEEPSEEK_KEY:
-    print("⚠ 请设置环境变量 DEEPSEEK_API_KEY", flush=True)
-    print("   export DEEPSEEK_API_KEY='your-key'", flush=True)
-    sys.exit(1)
-DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+W = Path(__file__).parent / "tmp"; W.mkdir(exist_ok=True)
+C = Path(__file__).parent / "douyin_cookies.txt"
+KEY = os.environ.get("DEEPSEEK_API_KEY")
+if not KEY: print("⚠ 设置 DEEPSEEK_API_KEY"); sys.exit(1)
 
-# 找 Python（搜索所有可用版本）
-PY = sys.executable
-candidates = [sys.executable, "python3", "python"]
-for p in [Path("C:/Users/windows/AppData/Local/Programs/Python"), Path("/c/Users/windows/AppData/Local/Programs/Python")]:
-    if p.exists():
-        for ver in sorted(p.iterdir(), reverse=True):
-            candidates.append(str(ver / "python.exe"))
+# Python 检测（找到带 whisper 的版本）
+PY = next((c for c in [sys.executable, "python3", "python"] + [str(p/v/"python.exe") for p in [Path("C:/Users/windows/AppData/Local/Programs/Python"), Path("/c/Users/windows/AppData/Local/Programs/Python")] if p.exists() for v in sorted(p.iterdir(), reverse=True)] if c and subprocess.run([c, "-c", "import whisper"], capture_output=True, timeout=10).returncode == 0), sys.executable)
 
-seen = set()
-for c in candidates:
-    if not c or c in seen: continue
-    seen.add(c)
-    if subprocess.run([c, "-c", "import whisper"], capture_output=True, timeout=10).returncode == 0:
-        PY = c; break
-        PY = c; break
-    # 再看有没有 Whisper（兜底）
-    if subprocess.run([c, "-c", "import whisper"], capture_output=True, timeout=10).returncode == 0:
-        PY = c
+HAS_FUNASR = subprocess.run([PY, "-m", "pip", "show", "funasr"], capture_output=True, timeout=10).returncode == 0
 
-AUTOGLM_APP_ID = "100003"
-AUTOGLM_APP_KEY = "38d2391985e2369a5fb8227d8e6cd5e5"
-AUTOGLM_TOKEN_URL = "http://127.0.0.1:18432/get_token"
-AUTOGLM_UPLOAD_URL = "https://autoglm-api.zhipuai.cn/agentdr/v1/assistant/upload-mix"
-AUTOGLM_RECOG_URL = "https://autoglm-api.zhipuai.cn/agentdr/v1/assistant/images-recognition"
-
-
-def sh(cmd, timeout=300):
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+def sh(cmd, t=300):
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=t)
     return r.returncode, r.stdout, r.stderr
 
-
-def dl_cmd(url, extra=None):
-    cmd = ["yt-dlp"]
-    if COOKIES.exists(): cmd += ["--cookies", str(COOKIES)]
-    if extra: cmd += extra
-    cmd += [url]
+def dl(url, *ext):
+    cmd = ["yt-dlp", "--cookies", str(C)] + list(ext) + [url] if C.exists() else ["yt-dlp"] + list(ext) + [url]
     return cmd
 
-
-# ── 1. 下载 ──
-
+# ── 下载 ──
 def download(url):
     print("📥 下载中...", flush=True)
-    audio = WORK_DIR / "a.mp3"
-    sh(dl_cmd(url, ["-x", "--audio-format", "mp3", "-o", str(audio), "--no-playlist"]))
-    if not audio.exists():
-        print("❌ 下载失败"); sys.exit(1)
-    return audio
+    a = W / "a.mp3"
+    sh(dl(url, "-x", "--audio-format", "mp3", "-o", str(a), "--no-playlist"))
+    if not a.exists(): print("❌ 下载失败"); sys.exit(1)
+    return a
 
-
-# ── 2. 转录（FunASR + Whisper 兜底）──
-
-HAS_FUNASR = subprocess.run([PY, "-m", "pip", "show", "funasr"],
-    capture_output=True, timeout=10).returncode == 0
-
-def transcribe(audio_path):
-    """优先 FunASR（中文更准），没有则用 Whisper"""
+# ── 转录 ──
+def transcribe(path):
     if HAS_FUNASR:
         print("🎤 听写中（FunASR）...", flush=True)
-        code = f"""
-from funasr import AutoModel
-model = AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
-    disable_update=True, disable_progress=True)
-r = model.generate(input=r'{audio_path.resolve()}')
-print(r[0]['text'])
-"""
-        rc, out, _ = sh([PY, "-c", code], timeout=1800)
+        c = f"from funasr import AutoModel; m=AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch', disable_update=True, disable_progress=True); r=m.generate(input=r'{path.resolve()}'); print(r[0]['text'])"
+        rc, out, _ = sh([PY, "-c", c], t=1800)
         if rc == 0 and out.strip():
-            # 清理 FunASR 进度输出，只保留中文文本
-            lines = out.strip().split("\n")
-            text = ' '.join(l for l in lines if not l.startswith('Download') and not l.startswith('Processing') and not l.startswith('funasr') and l.strip())
-            return text.replace(" ", "").strip()
-
+            return ' '.join(l for l in out.strip().split('\n') if not l.startswith(('Download','Processing','funasr')) and l.strip()).replace(' ','').strip()
     print("🎤 听写中（Whisper）...", flush=True)
-    code = f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{audio_path.resolve()}',language='zh',verbose=False); print(r['text'])"
-    rc, out, _ = sh([PY, "-c", code], timeout=1800)
+    rc, out, _ = sh([PY, "-c", f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{path.resolve()}',language='zh',verbose=False); print(r['text'])"], t=1800)
     return out.strip() if rc == 0 else ""
 
+# ── 画面分析（可选）──
+AUTOGLM = next((p for p in [Path.home()/".openclaw-autoclaw/skills/autoglm-image-recognition", Path.home()/".openclaw/skills/autoglm-image-recognition"] if p.exists()), None)
 
-# ── 3. 视觉分析（自动选择引擎）──
-
-# AutoGLM 路径自动检测
-AUTOGLM_CANDIDATES = [
-    Path.home() / ".openclaw-autoclaw/skills/autoglm-image-recognition",
-    Path.home() / ".openclaw/skills/autoglm-image-recognition",
-]
-AUTOGLM_SKILL_DIR = None
-for p in AUTOGLM_CANDIDATES:
-    if p.exists():
-        AUTOGLM_SKILL_DIR = p
-        break
-
-def has_local_vision():
-    """检查本地是否有可用的视觉模型"""
+def analyze_frame(path):
     r = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=10)
-    for m in ["llava", "minicpm", "bakllava"]:
-        if m in (r.stdout or "").lower():
-            return m
-    return None
-
-def analyze_frame(frame_path, local_model=None):
-    """分析单帧画面——优先本地，兜底云端"""
-    if local_model:
-        import base64
-        b64 = base64.b64encode(open(frame_path, "rb").read()).decode()
-        data = json.dumps({"model": f"{local_model}:latest", "prompt": "简短描述这个画面", "images": [b64], "stream": False}).encode()
-        req = urllib.request.Request("http://localhost:11434/api/generate", data=data,
-            headers={"Content-Type": "application/json"})
+    lm = next((m for m in ["llava","minicpm","bakllava"] if m in (r.stdout or "").lower()), None)
+    if lm:
+        import base64; b64 = base64.b64encode(open(path,"rb").read()).decode()
         try:
-            resp = json.loads(urllib.request.urlopen(req, timeout=120).read())
-            desc = resp.get("response", "").strip()
-            if desc: return desc
+            resp = json.loads(urllib.request.urlopen(urllib.request.Request("http://localhost:11434/api/generate",
+                json.dumps({"model":f"{lm}:latest","prompt":"简短描述这个画面","images":[b64],"stream":False}).encode(),
+                headers={"Content-Type":"application/json"}), timeout=120).read())
+            if resp.get("response"): return resp["response"]
         except: pass
-
-    # 兜底：AutoGLM 云端
+    if not AUTOGLM: return ""
     try:
-        r1 = subprocess.run([PY, str(AUTOGLM_SKILL_DIR / "upload-mix.py"), str(frame_path)],
-            capture_output=True, text=True, timeout=30)
+        r1 = subprocess.run([PY, str(AUTOGLM/"upload-mix.py"), str(path)], capture_output=True, text=True, timeout=30)
         if r1.returncode != 0: return ""
         url = json.loads(r1.stdout)["data"]["oss_info"][0]["oss_url"]
-        r2 = subprocess.run([PY, str(AUTOGLM_SKILL_DIR / "image-recognition.py"), url],
-            capture_output=True, text=True, timeout=30)
+        r2 = subprocess.run([PY, str(AUTOGLM/"image-recognition.py"), url], capture_output=True, text=True, timeout=30)
         if r2.returncode != 0: return ""
         return json.loads(r2.stdout)["data"]["text"]
-    except:
-        return ""
+    except Exception as e: print(f"  ⚠️ {e}", flush=True); return ""
 
-
-def visual_analysis(video_path, duration):
-    """场景检测 + 逐镜分析 — 基于 VideoContextEngine 的 HSV 直方图方案"""
-    if not video_path or duration <= 0: return []
+def visual_analysis(video, dur):
+    if not video or dur <= 0: return []
     print("👁️ 分析画面...", flush=True)
-
-    local_model = has_local_vision()
-    if local_model:
-        print(f"  🖥️ 本地模型: {local_model}", flush=True)
-    else:
-        print(f"  ☁️ 云端识别", flush=True)
-
-    # 场景检测：HSV 直方图对比，画面变了才算新场景
-    scenes = []
-    try:
-        code = """
-import cv2, json, numpy as np
-cap = cv2.VideoCapture(r"VIDEO_PATH")
-fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-interval = int(fps)
-scenes = []
-last_hist = None
-start = 0.0
-prev = 0.0
-idx = 0
+    r = subprocess.run([PY, "-c", f"""
+import cv2,json,numpy as np
+c=cv2.VideoCapture(r"{video}"); fps=c.get(cv2.CAP_PROP_FPS) or 25; n=int(fps); s=[]; lh=None; st=0.0; pv=0.0; i=0
 while True:
-    ret, frame = cap.read()
+    ret,f=c.read()
     if not ret: break
-    if idx % interval == 0:
-        now = idx / fps
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        hist = cv2.calcHist([hsv],[0,1],None,[50,60],[0,180,0,256])
-        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
-        hist = hist.flatten()
-        change = False
-        if last_hist is not None:
-            score = cv2.compareHist(last_hist, hist, cv2.HISTCMP_CORREL)
-            if (1.0 - score) > 0.3: change = True
-        if (change and (now - start) >= 2) or (now - start) >= 60:
-            scenes.append({"start": start, "end": prev})
-            start = now
-        last_hist = hist
-        prev = now
-    idx += 1
-if prev > start: scenes.append({"start": start, "end": prev})
-cap.release()
-print(json.dumps(scenes))
-""".replace("VIDEO_PATH", str(video_path))
-        rc, out, _ = subprocess.run([PY, "-c", code], capture_output=True, text=True, timeout=300)
-        if rc == 0 and out.strip():
-            scenes = json.loads(out.strip())
-    except:
-        pass
-
-    if not scenes:
-        scenes = [{"start": 0, "end": min(int(duration), 300)}]
+    if i%n==0:
+        now=i/fps; h=cv2.cvtColor(f,cv2.COLOR_BGR2HSV)
+        h2=cv2.calcHist([h],[0,1],None,[50,60],[0,180,0,256]); cv2.normalize(h2,h2,0,1,cv2.NORM_MINMAX); h2=h2.flatten()
+        ch=False
+        if lh is not None and (1.0-cv2.compareHist(lh,h2,cv2.HISTCMP_CORREL))>0.3: ch=True
+        if (ch and (now-st)>=2) or (now-st)>=60: s.append({{"start":st,"end":pv}}); st=now
+        lh=h2; pv=now
+    i+=1
+if pv>st: s.append({{"start":st,"end":pv}})
+c.release(); print(json.dumps(s))
+"""], capture_output=True, text=True, timeout=300)
+    scenes = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else [{"start":0,"end":min(int(dur),300)}]
     print(f"  📐 {len(scenes)} 个场景", flush=True)
-
-    # 逐场景分析关键帧
     results = []
-    for i, s in enumerate(scenes):
-        if i > 5: break  # 最多看 6 个场景
-        ts = s["start"] + (s["end"] - s["start"]) / 2
-        frame = WORK_DIR / f"s{i:02d}.jpg"
-        subprocess.run(["ffmpeg", "-ss", str(ts), "-i", str(video_path), "-vframes", "1", "-q:v", "2", str(frame)],
-            capture_output=True, timeout=30)
-        if frame.exists():
-            desc = analyze_frame(frame, local_model)
-            if desc: results.append({"time": f"{int(s['start'])}s", "desc": desc})
-            frame.unlink()
-
+    for i, s in enumerate(scenes[:6]):
+        ts = s["start"] + (s["end"]-s["start"])/2
+        f = W / f"s{i:02d}.jpg"
+        subprocess.run(["ffmpeg","-ss",str(ts),"-i",str(video),"-vframes","1","-q:v","2",str(f)], capture_output=True, timeout=30)
+        if f.exists():
+            d = analyze_frame(f)
+            if d: results.append({"time":f"{int(s['start'])}s","desc":d})
+            f.unlink()
     return results
 
-
-# ── 4. AI 蒸馏（3 提取器并行）──
-
-def llm_call(prompt, max_tokens=2048):
-    """调 DeepSeek API"""
-    data = json.dumps({"model": "deepseek-v4-flash", "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}).encode()
-    req = urllib.request.Request(DEEPSEEK_URL, data=data,
-        headers={"Authorization": f"Bearer {DEEPSEEK_KEY}", "Content-Type": "application/json"})
-    try:
-        resp = json.loads(urllib.request.urlopen(req, timeout=60).read())
-        return resp["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f""
-
-
-# ── 5. 抖音图文提取（调用 douyin_note.py）──
-
+# ── 抖音图文 ──
 def extract_note(url):
-    """调用 douyin_note.py 提取图文"""
-    note_py = Path(__file__).parent / "douyin_note.py"
-    # 用能找到的最佳 Python
-    note_py_python = PY
-    for c in [PY, "python3", "python"]:
-        if subprocess.run([c, "-c", "import easyocr"], capture_output=True).returncode == 0:
-            note_py_python = c
-            break
     try:
-        rc, out, _ = sh([note_py_python, str(note_py), url], timeout=60)
+        rc, out, _ = sh([PY, str(Path(__file__).parent/"douyin_note.py"), url], t=120)
         if rc != 0: return "⚠ 提取失败"
-        lines = out.split("\n")
-        for i, line in enumerate(lines):
-            if line.startswith("📝 图文内容："):
-                # 内容在下一行
-                if i + 1 < len(lines):
-                    content = lines[i + 1].strip()
-                    # 去掉 markdown 标记
-                    content = content.replace("**", "").replace("## ", "")
-                    return content[:500]
-                return line[len("📝 图文内容："):].strip()
-        # 尝试从输出中找正文
-        lines = [l for l in out.split("\n") if len(l) > 20 and "界面" not in l[:8]]
-        return "\n".join(lines[:5]) if lines else "⚠ 未能提取内容"
-    except Exception as e:
-        return f"⚠ 需要 playwright：pip install playwright && playwright install chromium"
+        # 从 douyin_note.py 输出提取 OCR 图片文字
+        # 图片内容行是缩进的文本，跳过标题/编号/UI干扰
+        noise = ["下载","桌面","快捷","保存登录","取消","保存","浏览器","静音","打开声音",
+                 "充钻石","客户端","壁纸","通知","消息","投稿","展开","粉丝","获赞"]
+        lines = []
+        for l in out.split("\n"):
+            t = l.strip()
+            if not t or t.startswith("📖") or t.startswith("📄"): continue
+            if any(k in t[:15] for k in noise): continue
+            # 保留有中文内容的行（OCR文本）
+            if any('\u4e00' <= c <= '\u9fff' for c in t[:10]):
+                lines.append(t)
+        return "\n".join(lines)[:5000] if lines else "⚠ 未能提取图片文字"
+    except Exception as e: return f"⚠ {e}"
 
+# ── AI 蒸馏 ──
+def llm(prompt, mt=4096):
+    try:
+        resp = json.loads(urllib.request.urlopen(urllib.request.Request("https://api.deepseek.com/chat/completions",
+            json.dumps({"model":"deepseek-v4-flash","messages":[{"role":"user","content":prompt}],"max_tokens":mt}).encode(),
+            headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"}), timeout=60).read())
+        return resp["choices"][0]["message"]["content"]
+    except Exception as e: print(f"⚠ LLM: {e}", flush=True); return ""
 
-def distill(transcript, vision=None):
-    if not transcript.strip():
-        return "⚠ 未检测到语音内容"
+def distill(text, vision=None):
+    if not text.strip(): return "⚠ 无内容"
     print("🧠 AI 分析中...", flush=True)
-
-    # 精简画面描述：去掉 UI 描述，只保留内容
     vis = ""
     if vision:
-        lines = []
-        for v in vision:
-            t = v['desc']
-            # 跳过纯 UI 描述
-            if len(t) < 20 or any(k in t[:20] for k in ["界面", "按钮", "图标", "截图", "布局"]):
-                continue
-            lines.append(f"[{v['time']}] {t}")
-        if lines:
-            vis = "\n画面：\n" + "\n".join(lines[:2])
+        lines = [f"[{v['time']}] {v['desc']}" for v in vision if len(v['desc']) > 20 and not any(k in v['desc'][:20] for k in ["界面","按钮","图标","截图"])]
+        if lines: vis = "\n画面：\n" + "\n".join(lines[:2])
+    content = (text[:5000] + '...（以下省略）') if len(text) > 5000 else text
+    p = f"""严格基于以下内容分析，不要添加任何原文没有的信息：
 
-    prompt = f"""分析整段视频内容（从头到尾都要覆盖），做 3 件事：
-
-1. 纠错：修正错別字和不通顺的地方，保留口语气质
-2. 一句话概括核心主题
-3. 提取结构化内容（没有就不写）：
-   - 🧠 思维模型/框架
-   - 📏 原则/规则  
-   - 📖 案例
-   - ⚠️ 边界/注意
-   - 💡 可执行步骤
+1. 纠错
+2. 一句话概括主题
+3. 提取：思维模型、原则、案例、边界、可执行步骤
 
 内容：
-{transcript}{vis}"""
-
-    result = llm_call(prompt, max_tokens=4096)
-    return result if result else transcript
-
+{content}{vis}"""
+    return llm(p, 2048) or text
 
 # ── 主流程 ──
-
 def main():
-    ap = argparse.ArgumentParser(description="gist — 全平台视频分析")
-    ap.add_argument("url", help="视频链接")
-    ap.add_argument("--json", action="store_true")
-    ap.add_argument("--vision", action="store_true", help="启用画面分析（需 Ollama + 视觉模型）")
-    ap.add_argument("--note", action="store_true", help="抖音图文模式（需 Chrome 登录抖音）")
-    args = ap.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("url"); ap.add_argument("--json", action="store_true")
+    ap.add_argument("--vision", action="store_true"); ap.add_argument("--note", action="store_true")
+    args = ap.parse_args(); t0 = time.time()
 
-    t0 = time.time()
-
-    # 图文模式（跳过视频管线）
     if args.note:
-        print("📖 图文模式...", flush=True)
         text = extract_note(args.url)
         analysis = distill(text)
-        elapsed = f"{time.time()-t0:.0f}s"
-        result = {"text": text, "analysis": analysis, "elapsed": elapsed}
-        (Path(__file__).parent / "last_analysis.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
-        print(f"\n{'='*50}")
-        print(f"  gist 完成 ⏱ {elapsed}")
-        print(f"{'='*50}\n{analysis}\n{'='*50}\n  来聊 👊\n{'='*50}")
+        (Path(__file__).parent/"last_analysis.json").write_text(json.dumps({"text":text,"analysis":analysis}, ensure_ascii=False, indent=2))
+        print(f"\n{'='*50}\n  gist 完成 ⏱ {time.time()-t0:.0f}s\n{'='*50}\n{analysis}\n{'='*50}\n  来聊 👊\n{'='*50}")
         return
 
-    # 1. 下载
-    audio = download(args.url)
-    print(f"  ✅ {audio.stat().st_size//1024}KB", flush=True)
-
-    # 2. 转录
-    text = transcribe(audio)
-    audio.unlink()
-
-    # 3. 视觉（可选）
+    a = download(args.url); print(f"  ✅ {a.stat().st_size//1024}KB", flush=True)
+    text = transcribe(a); a.unlink()
     vision = []
     if args.vision:
         print("📥 下载视频...", flush=True)
-        video = WORK_DIR / "v.mp4"
-        sh(dl_cmd(args.url, ["-f", "bv+ba/b", "-o", str(video), "--no-playlist", "--merge-output-format", "mp4"]))
-        dur = 0
-        rc, out, _ = sh(dl_cmd(args.url, ["--print", "%(duration)s", "--no-playlist"]))
-        if rc == 0:
-            try: dur = float(out.strip())
-            except: pass
-        if video.exists() and dur > 0:
-            vision = visual_analysis(video, dur)
-            video.unlink()
+        v = W / "v.mp4"
+        sh(dl(args.url, "-f", "bv+ba/b", "-o", str(v), "--no-playlist", "--merge-output-format", "mp4"))
+        r = subprocess.run(dl(args.url, "--print", "%(duration)s", "--no-playlist"), capture_output=True, text=True, timeout=30)
+        dur = float(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else 0
+        if v.exists() and dur > 0: vision = visual_analysis(v, dur); v.unlink()
 
-    # 4. AI 蒸馏
     analysis = distill(text, vision)
-    elapsed = f"{time.time()-t0:.0f}s"
+    (Path(__file__).parent/"last_analysis.json").write_text(json.dumps({"text":text,"analysis":analysis,"vision":vision,"elapsed":f"{time.time()-t0:.0f}s"}, ensure_ascii=False, indent=2))
+    for f in W.iterdir():
+        if f.is_file() and f.suffix in ['.mp3','.mp4','.jpg','.webp']: f.unlink()
+    if args.json: print(json.dumps({"analysis":analysis}, ensure_ascii=False, indent=2))
+    else: print(f"\n{'='*50}\n  gist 完成 ⏱ {time.time()-t0:.0f}s\n{'='*50}\n{analysis}\n{'='*50}\n  来聊这个视频 👊\n{'='*50}")
 
-    # 5. 保存 + 输出
-    result = {"text": text, "analysis": analysis, "vision": vision, "elapsed": elapsed}
-    (Path(__file__).parent / "last_analysis.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
-
-    if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-    else:
-        print(f"\n{'='*50}")
-        print(f"  gist 完成 ⏱ {elapsed}")
-        if vision:
-            for v in vision:
-                print(f"  👁️ [{v['time']}] {v['desc']}")
-        print(f"{'='*50}\n{analysis}\n{'='*50}\n  来聊这个视频 👊\n{'='*50}")
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
