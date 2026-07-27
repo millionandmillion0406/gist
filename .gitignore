@@ -13,3 +13,13 @@ report_kjkjm1580.json
 _tmp_attach.pdf
 _tmp_book.txt
 douyin_cookies.txt
+
+# 敏感配置
+FACTS.md
+send_*.py
+jm2pdf.py
+memory.py
+submission_*.txt
+submission_*.json
+totp.py
+
