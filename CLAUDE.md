@@ -1,15 +1,15 @@
 # gist — 视频内容蒸馏工具
 
-## 启动必读
-
-每次启动先走这两步：
+## 启动
 
 ```bash
-# 1. 读配置
-cat FACTS.md
-
-# 2. 过一遍关键事实
-python -c "from memory import Memory; m=Memory(); print(f'{m.count()}条记忆'); [print(f'  {k} → {m.recall(k)}') for k in ['邮箱','GitHub','抖音','DeepSeek','投稿']]"
+python -c "
+from memory import Memory
+m=Memory(); print(f'{m.count()}条事实')
+for k in ['邮箱','GitHub','抖音','DeepSeek','投稿']: print(f'  {k} → {m.recall(k)}')
+"
+cat FACTS.md | head -30
+cat INSIGHTS.md 2>/dev/null | head -15
 ```
 
 ## 干活前的习惯

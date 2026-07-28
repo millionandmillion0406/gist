@@ -11,7 +11,9 @@ if not KEY: print("⚠ 设置 DEEPSEEK_API_KEY"); sys.exit(1)
 # Python 检测（找到带 whisper 的版本）
 PY = next((c for c in [sys.executable, "python3", "python"] + [str(p/v/"python.exe") for p in [Path("C:/Users/windows/AppData/Local/Programs/Python"), Path("/c/Users/windows/AppData/Local/Programs/Python")] if p.exists() for v in sorted(p.iterdir(), reverse=True)] if c and subprocess.run([c, "-c", "import whisper"], capture_output=True, timeout=10).returncode == 0), sys.executable)
 
-HAS_FUNASR = subprocess.run([PY, "-m", "pip", "show", "funasr"], capture_output=True, timeout=10).returncode == 0
+try:
+    HAS_FUNASR = subprocess.run([PY, "-m", "pip", "show", "funasr"], capture_output=True, timeout=5).returncode == 0
+except: HAS_FUNASR = False
 
 def sh(cmd, t=300):
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=t)
@@ -38,7 +40,7 @@ def transcribe(path):
         if rc == 0 and out.strip():
             return ' '.join(l for l in out.strip().split('\n') if not l.startswith(('Download','Processing','funasr')) and l.strip()).replace(' ','').strip()
     print("🎤 听写中（Whisper）...", flush=True)
-    rc, out, _ = sh([PY, "-c", f"import whisper; m=whisper.load_model('base'); r=m.transcribe(r'{path.resolve()}',language='zh',verbose=False); print(r['text'])"], t=1800)
+    rc, out, _ = sh([PY, "-c", f"import whisper; m=whisper.load_model('tiny'); r=m.transcribe(r'{path.resolve()}',language='zh',verbose=False); print(r['text'])"], t=1800)
     return out.strip() if rc == 0 else ""
 
 # ── 画面分析（可选）──
@@ -134,16 +136,18 @@ def distill(text, vision=None):
     if vision:
         lines = [f"[{v['time']}] {v['desc']}" for v in vision if len(v['desc']) > 20 and not any(k in v['desc'][:20] for k in ["界面","按钮","图标","截图"])]
         if lines: vis = "\n画面：\n" + "\n".join(lines[:2])
-    content = (text[:5000] + '...（以下省略）') if len(text) > 5000 else text
-    p = f"""严格基于以下内容分析，不要添加任何原文没有的信息：
+    content = (text[:3000] + '...（以下省略）') if len(text) > 3000 else text
+    p = f"""你是蒸馏大师。修正错别字后，只提取能带走的东西。
+不要概括视频内容。
 
-1. 纠错
-2. 一句话概括主题
-3. 提取：思维模型、原则、案例、边界、可执行步骤
+格式：
+## 核心洞察
+## 可复用的思维模型
+## 怎么做
 
 内容：
 {content}{vis}"""
-    return llm(p, 2048) or text
+    return llm(p, 800) or text
 
 # ── 主流程 ──
 def main():
@@ -171,7 +175,28 @@ def main():
         if v.exists() and dur > 0: vision = visual_analysis(v, dur); v.unlink()
 
     analysis = distill(text, vision)
+    # 保存到文件
     (Path(__file__).parent/"last_analysis.json").write_text(json.dumps({"text":text,"analysis":analysis,"vision":vision,"elapsed":f"{time.time()-t0:.0f}s"}, ensure_ascii=False, indent=2))
+    
+    # 自动追加到 INSIGHTS.md
+    try:
+        insights = Path(__file__).parent / "INSIGHTS.md"
+        now = __import__('datetime').datetime.now()
+        with open(insights, 'a', encoding='utf-8') as f:
+            f.write(f"\n---\n## {now.strftime('%Y-%m-%d %H:%M')} gist 蒸馏\n\n{analysis}\n")
+        print(f"  📝 已追加到 INSIGHTS.md", flush=True)
+    except: pass
+
+    # 自动导入知识库
+    try:
+        sv_path = Path(__file__).parent / "raw" / f"gist-{now.strftime('%Y%m%d-%H%M%S')}.md"
+        sv_path.parent.mkdir(exist_ok=True)
+        sv_path.write_text(f"# 视频蒸馏 {now.strftime('%Y-%m-%d %H:%M')}\n\n{analysis}", encoding='utf-8')
+        subprocess.run(["swarmvault", "ingest", str(sv_path)], capture_output=True, timeout=30)
+        subprocess.run(["swarmvault", "compile"], capture_output=True, timeout=60)
+        print(f"  📚 已导入 SwarmVault 知识库", flush=True)
+    except: pass
+
     for f in W.iterdir():
         if f.is_file() and f.suffix in ['.mp3','.mp4','.jpg','.webp']: f.unlink()
     if args.json: print(json.dumps({"analysis":analysis}, ensure_ascii=False, indent=2))

@@ -2,6 +2,7 @@ tmp/
 tmp_note/
 edge_debug_profile/
 memory_data/
+mem0_data/
 __pycache__/
 *.pyc
 *.pyo
@@ -23,3 +24,10 @@ submission_*.txt
 submission_*.json
 totp.py
 
+
+# 知识库
+state/
+wiki/
+raw/
+swarmvault.config.json
+swarmvault.schema.md
