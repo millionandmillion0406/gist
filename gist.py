@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""gist — 视频链接扔进来，下载→转录→AI分析"""
+"""link-distill — 扔链接，AI 自动蒸馏出可复用的经验。
+流程：下载 → 转录 → AI蒸馏 → 入库"""
 import argparse, json, os, subprocess, sys, time, urllib.request, shutil
 from pathlib import Path
 
