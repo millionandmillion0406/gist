@@ -1,5 +1,5 @@
 ---
-name: gist
+name: link-distill
 description: >
   AI视频分析工具：扔链接，自动转录、总结、提取结构化知识。
   支持1200+平台（B站、抖音、YouTube、小红书…）。
@@ -7,22 +7,22 @@ description: >
   关键词：视频转文字、内容蒸馏、知识提取、AI Agent技能。
 ---
 
-# gist — 和 AI 一起从视频中学
+# link-distill — 和 AI 一起从视频中学
 
-用户给你视频链接时，你做三件事：**跑 gist → 读结果 → 跟用户聊**
+用户给你视频链接时，你做三件事：**跑 link-distill → 读结果 → 跟用户聊**
 
 ## 0. 首次使用：装依赖
 
 ```bash
-cd <gist目录>
+cd <link-distill目录>
 pip install yt-dlp openai-whisper torch funasr
 # 确保 ffmpeg 已安装（winget install ffmpeg）
 ```
 
-## 1. 跑 gist
+## 1. 跑 link-distill
 
 ```bash
-python gist.py "<用户给的链接>"
+python link-distill.py "<用户给的链接>"
 ```
 
 会自动：

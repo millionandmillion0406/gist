@@ -1,4 +1,4 @@
-# gist — AI 视频内容蒸馏工具
+# link-distill — AI 视频内容蒸馏工具
 
 > **视频分析 · 语音转文字 · 内容蒸馏 · 知识提取 · 多平台下载**
 > 支持 B站、抖音、YouTube、小红书、快手、微博、优酷、爱奇艺等 1200+ 平台
@@ -6,41 +6,41 @@
 扔链接，AI 自动拆解精华，你和 AI 一起消化、复用。
 
 ```bash
-python gist.py <链接>
-python gist.py <链接> --vision   # 加画面分析
+python link-distill.py <链接>
+python link-distill.py <链接> --vision   # 加画面分析
 ```
 
 **最简单用法：把这个仓库丢给你的 AI Agent，它自己会搞定。**
 
 ---
 
-## 凭什么选 gist
+## 凭什么选 link-distill
 
 ### 🌍 1200+ 平台，一个命令通吃
 别的工具：只支持 YouTube，最多加个 B站
-gist：B站、抖音、快手、小红书、微博、优酷、爱奇艺、腾讯视频、YouTube、Netflix、TikTok……
+link-distill：B站、抖音、快手、小红书、微博、优酷、爱奇艺、腾讯视频、YouTube、Netflix、TikTok……
 
 ### 🔁 不是转文字，是"蒸馏"
 别的工具：给你一段逐字稿
-gist：拆出**思维模型、原则、案例、边界、可执行步骤**——你和 AI 可以直接拿来用
+link-distill：拆出**思维模型、原则、案例、边界、可执行步骤**——你和 AI 可以直接拿来用
 
 ### 🖼️ 抖音图文也能读
 别的工具：只能处理视频
-gist：图文帖子一样提取内容
+link-distill：图文帖子一样提取内容
 
 ### 👁️ 画面也分析
 别的工具：纯音频转录
-gist：装个 Ollama 就能让 AI 看懂画面内容（可选）
+link-distill：装个 Ollama 就能让 AI 看懂画面内容（可选）
 
 ### 🤖 任何 Agent 都能用
 别的工具：绑定特定平台
-gist：Claude Code、Codex、ZCode、OpenClaw、Cursor……全兼容
+link-distill：Claude Code、Codex、ZCode、OpenClaw、Cursor……全兼容
 
 ---
 
 ## 竞品对比
 
-| 功能 | **gist** | BiliNote | video-parse-transcribe | cangjie-skill |
+| 功能 | **link-distill** | BiliNote | video-parse-transcribe | cangjie-skill |
 |:-----|:--------:|:--------:|:----------------------:|:-------------:|
 | 平台数 | **1200+** | 3 | 20+ | 0（需外部输入）|
 | 音频转录 | ✅ FunASR+Whisper | ✅ Whisper | ✅ Whisper tiny | ❌ |
