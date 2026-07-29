@@ -31,3 +31,6 @@ wiki/
 raw/
 swarmvault.config.json
 swarmvault.schema.md
+hotclip
+videos/
+make_video.py

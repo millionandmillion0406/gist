@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""抖音图文提取：定位内容图片 → 下载 → OCR"""
-import asyncio, sys, os, urllib.request
+"""抖音图文提取：下载每张图片 → OCR → 输出文字"""
+import asyncio, sys, os, re
 from pathlib import Path
 from playwright.async_api import async_playwright
 
@@ -19,15 +19,6 @@ def ocr(path):
     return [t for t in r if len(t) > 5]
 
 
-async def dl_via_page(page, url, path):
-    """用浏览器页面下载图片（带cookies和referer）"""
-    resp = await page.context.request.get(url)
-    if resp.status == 200:
-        path.write_bytes(await resp.body())
-        return True
-    return False
-
-
 async def main():
     url = sys.argv[1] if len(sys.argv) > 1 else ""
     if not url: print("⚠ 请提供链接"); return
@@ -40,42 +31,56 @@ async def main():
         await asyncio.sleep(4)
         print(f"  标题: {(await page.title())[:80]}", flush=True)
 
-        # 翻页加载
+        # 翻页加载所有图片
         for i in range(15):
             await page.keyboard.press("ArrowRight")
             await asyncio.sleep(1.5)
 
-        # 提取内容图片（排除头像/图标/UI元素），保留完整URL含签名
+        # 获取所有图片URL（不做过滤，只看大小）
         imgs = await page.evaluate('''() =>
             [...document.querySelectorAll('img')]
-                .filter(i => {
-                    const w = i.naturalWidth || i.width;
-                    const h = i.naturalHeight || i.height;
-                    return w >= 300 && h >= 300 && !i.src.includes('avatar') && !i.src.includes('emblem');
-                })
+                .filter(i => (i.naturalWidth || i.width) >= 200 && (i.naturalHeight || i.height) >= 200)
                 .map(i => i.src)
         ''')
-        imgs = list(dict.fromkeys(imgs))  # 去重
-        print(f"  内容图片 {len(imgs)} 张", flush=True)
+        # 去重
+        seen_urls = set()
+        unique = []
+        for u in imgs:
+            base = u.split('?')[0]
+            if base not in seen_urls:
+                seen_urls.add(base)
+                unique.append(u)
 
-        seen = set()
-        for i, src in enumerate(imgs):
+        print(f"  图片 {len(unique)} 张", flush=True)
+
+        all_text = set()
+        for i, src in enumerate(unique[:10]):  # 最多10张
             path = TMP / f"n{i}.jpg"
             try:
-                if not await dl_via_page(page, src, path): continue
-                if os.path.getsize(path) < 5000: continue
-                texts = [t for t in ocr(path) if t not in seen]
+                # 用 Playwright 下载（带 cookies）
+                resp = await page.context.request.get(src, timeout=15000)
+                if resp.status != 200: continue
+                data = await resp.body()
+                if len(data) < 5000: continue
+                with open(path, 'wb') as f: f.write(data)
+                texts = ocr(path)
                 for t in texts:
-                    seen.add(t)
-                    if sum('\u4e00' <= c <= '\u9fff' for c in t) > 3:
-                        noise = ["登录","下载","客户端","壁纸","通知","消息","粉丝","获赞"]
+                    cn = sum(1 for c in t if '\u4e00' <= c <= '\u9fff')
+                    if cn > 3 and t not in all_text:
+                        all_text.add(t)
+                        noise = ["登录","下载","客户端","壁纸","通知","消息","粉丝","获赞","充钻石"]
                         if not any(k in t[:15] for k in noise):
                             print(f"  {t[:200]}", flush=True)
             except: pass
             finally:
                 if path.exists(): path.unlink()
 
-        if not seen: print("\n⚠ 未提取到内容", flush=True)
+        if not all_text:
+            # 没有图片文字，读简介
+            desc = await page.evaluate('() => document.querySelector("meta[name=description]")?.content || ""')
+            if desc:
+                print(f"  (无图文字，来自简介) {desc[:300]}", flush=True)
+
         await browser.close()
 
 asyncio.run(main())

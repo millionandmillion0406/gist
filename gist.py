@@ -103,23 +103,38 @@ c.release(); print(json.dumps(s))
 
 # ── 抖音图文 ──
 def extract_note(url):
+    """提取图文内容：优先 OCR 图片文字，后备读页面简介"""
+    # 优先 OCR
     try:
-        rc, out, _ = sh([PY, str(Path(__file__).parent/"douyin_note.py"), url], t=120)
-        if rc != 0: return "⚠ 提取失败"
-        # 从 douyin_note.py 输出提取 OCR 图片文字
-        # 图片内容行是缩进的文本，跳过标题/编号/UI干扰
-        noise = ["下载","桌面","快捷","保存登录","取消","保存","浏览器","静音","打开声音",
-                 "充钻石","客户端","壁纸","通知","消息","投稿","展开","粉丝","获赞"]
-        lines = []
-        for l in out.split("\n"):
-            t = l.strip()
-            if not t or t.startswith("📖") or t.startswith("📄"): continue
-            if any(k in t[:15] for k in noise): continue
-            # 保留有中文内容的行（OCR文本）
-            if any('\u4e00' <= c <= '\u9fff' for c in t[:10]):
-                lines.append(t)
-        return "\n".join(lines)[:5000] if lines else "⚠ 未能提取图片文字"
-    except Exception as e: return f"⚠ {e}"
+        rc, out, _ = sh([PY, str(Path(__file__).parent/"douyin_note.py"), url], t=180)
+        if rc == 0 and out.strip():
+            lines = [l.strip() for l in out.split("\n") if l.strip() and not l.startswith("📖") and not l.startswith("📄")]
+            # 过滤 UI 干扰
+            noise = ["下载","桌面","快捷","保存登录","取消","保存","浏览器","静音","充钻石","客户端","壁纸","通知","消息","粉丝","获赞"]
+            lines = [l for l in lines if not any(k in l[:15] for k in noise)]
+            if lines:
+                return "\n".join(lines)[:5000]
+    except: pass
+    
+    # 后备：读页面简介
+    try:
+        import asyncio
+        from playwright.async_api import async_playwright
+        async def get_desc():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(3)
+                t = await page.title()
+                d = await page.evaluate('() => document.querySelector("meta[name=description]")?.content || ""')
+                await browser.close()
+                return f"{t}\n{d}"
+        desc = asyncio.run(get_desc())
+        if desc.strip(): return desc[:2000]
+    except: pass
+    
+    return "⚠ 提取失败"
 
 # ── AI 蒸馏 ──
 def llm(prompt, mt=4096):
@@ -137,7 +152,7 @@ def distill(text, vision=None):
     if vision:
         lines = [f"[{v['time']}] {v['desc']}" for v in vision if len(v['desc']) > 20 and not any(k in v['desc'][:20] for k in ["界面","按钮","图标","截图"])]
         if lines: vis = "\n画面：\n" + "\n".join(lines[:2])
-    content = (text[:3000] + '...（以下省略）') if len(text) > 3000 else text
+    content = text
     p = f"""你是蒸馏大师。修正错别字后，只提取能带走的东西。
 不要概括视频内容。
 
@@ -154,14 +169,32 @@ def distill(text, vision=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("url"); ap.add_argument("--json", action="store_true")
-    ap.add_argument("--vision", action="store_true"); ap.add_argument("--note", action="store_true")
+    ap.add_argument("--vision", action="store_true")
     args = ap.parse_args(); t0 = time.time()
 
-    if args.note:
+    # 自动检测是图文还是视频
+    import asyncio
+    try:
+        from playwright.async_api import async_playwright
+        async def detect():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                await page.goto(args.url, wait_until="domcontentloaded", timeout=20000)
+                await asyncio.sleep(2)
+                url = page.url
+                await browser.close()
+                return url
+        final_url = asyncio.run(detect())
+        is_note = "/note/" in final_url
+    except:
+        is_note = False
+
+    if is_note:
         text = extract_note(args.url)
         analysis = distill(text)
         (Path(__file__).parent/"last_analysis.json").write_text(json.dumps({"text":text,"analysis":analysis}, ensure_ascii=False, indent=2))
-        print(f"\n{'='*50}\n  gist 完成 ⏱ {time.time()-t0:.0f}s\n{'='*50}\n{analysis}\n{'='*50}\n  来聊 👊\n{'='*50}")
+        print(f"\n{'='*50}\n  完成 ⏱ {time.time()-t0:.0f}s\n{'='*50}\n{analysis}\n{'='*50}\n  来聊 👊\n{'='*50}")
         return
 
     a = download(args.url); print(f"  ✅ {a.stat().st_size//1024}KB", flush=True)
