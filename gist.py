@@ -46,7 +46,20 @@ def transcribe(audio):
 def distill(text):
     if not text.strip(): return "⚠ 无内容"
     print("[AI]", flush=True)
-    p = f"修正错别字，提取可复用的经验。\n\n## 核心洞察\n## 思维模型\n## 怎么做\n\n内容：\n{text}"
+    p = f"""修正错别字后，做真正的蒸馏——不是概括内容，是把里面的精华炼出来。
+
+每一条输出都要做到：
+- 这个经验为什么成立？（讲清楚逻辑）
+- 在什么场景下能用？（给一个具体例子）
+- 跟已知的常识有什么不同？（点出反直觉的地方）
+
+格式：
+## 核心洞察（每一条都要有"为什么成立+应用场景+反直觉点"）
+## 思维模型
+## 怎么做
+
+内容：
+{text}"""
     try:
         d = json.dumps({"model":"deepseek-v4-flash","messages":[{"role":"user","content":p}],"max_tokens":1024}).encode()
         r = urllib.request.Request("https://api.deepseek.com/chat/completions",data=d,headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"})
