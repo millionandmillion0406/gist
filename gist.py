@@ -16,15 +16,39 @@ def sh(cmd, t=300):
     except: return False, "", "timeout/fail"
 
 # 1. 下载
+def ytdlp_cmd():
+    cmd = ["yt-dlp"]
+    if COOKIES.exists(): cmd += ["--cookies",str(COOKIES)]
+    return cmd
+
 def download(url):
     print("[下载]", flush=True)
     a = W / "a.mp3"; a.unlink(missing_ok=True)
-    cmd = ["yt-dlp"]
-    if COOKIES.exists(): cmd += ["--cookies",str(COOKIES)]
-    cmd += ["-x","--audio-format","mp3","-o",str(a),"--no-playlist",url]
-    ok, _, e = sh(cmd, 120)
-    if not ok or not a.exists(): print(f"  失败: {e[:100]}", flush=True); return None
+    cmd = ytdlp_cmd() + ["-x","--audio-format","mp3","-o",str(a),"--no-playlist",url]
+    ok, _, e = sh(cmd, 180)
+    if not ok or not a.exists(): print(f"  失败: {e[-200:]}", flush=True); return None
     print(f"  {a.stat().st_size//1024}KB", flush=True); return a
+
+def download_video(url):
+    """下载视频本体，多策略降级 + 自动重试（应对偶发风控/网络抖动）"""
+    v = W / "v.mp4"
+    # 策略链：B站等分离流 → 抖音等单文件流 → mp4 兜底
+    strategies = [
+        ["-f","bv+ba/b","--merge-output-format","mp4"],
+        ["-f","b"],
+        ["-f","b[ext=mp4]"],
+    ]
+    for round_no in range(2):
+        for s in strategies:
+            v.unlink(missing_ok=True)
+            ok, _, e = sh(ytdlp_cmd() + s + ["-o",str(v),"--no-playlist",url], 300)
+            if ok and v.exists() and v.stat().st_size > 100_000:
+                print(f"  {v.stat().st_size//1024//1024}MB", flush=True)
+                return v
+            # 关键：失败原因必须可见，否则只能靠猜
+            if e.strip(): print(f"  [策略 {s[1]} 失败] {e.strip()[-150:]}", flush=True)
+        print(f"  第 {round_no+1} 轮失败，重试…", flush=True)
+    return None
 
 # 2. 转录
 def transcribe(audio):
@@ -114,9 +138,8 @@ def visual_analysis(url):
     # 通道2：下载视频，场景检测，逐场景抽帧分析
     try:
         print("  📥 下载视频...", flush=True)
-        v = W / "v.mp4"
-        sh(["yt-dlp","-f","bv+ba/b","-o",str(v),"--no-playlist","--merge-output-format","mp4",url],120)
-        if not v.exists():
+        v = download_video(url)
+        if not v:
             print("  视频下载失败，只用元数据")
             return results
 
