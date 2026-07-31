@@ -99,8 +99,9 @@ link-distill：Claude Code、Codex、ZCode、OpenClaw、Cursor……全兼容
 ```bash
 pip install yt-dlp openai-whisper torch funasr
 winget install ffmpeg
-# 画面分析（可选）
-ollama pull llava:7b
+# 画面分析（可选，装一个就行，自动按质量排序选择）
+ollama pull qwen2.5vl:3b   # 效果最好，推荐
+ollama pull llava:7b       # 老模型，当备用
 ```
 
 ## 输出
