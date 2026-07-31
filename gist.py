@@ -65,59 +65,82 @@ def analyze_frame(frame, model):
         return ""
 
 def visual_analysis(url):
-    """bb-browser思路：用浏览器拿封面图分析，不下载视频"""
+    """双通道画面分析：浏览器元数据 + 视频逐场景抽帧"""
     print("[画面]", flush=True)
     model = has_local_vision()
     if not model:
         print("  无本地视觉模型，跳过画面分析")
         return []
     print(f"  Ollama: {model}")
-    
+
+    results = []
+
+    # 通道1：浏览器拿元数据+封面（补充上下文）
     try:
         import asyncio
         from playwright.async_api import async_playwright
-        async def get_cover():
+        async def get_meta():
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 await asyncio.sleep(2)
-                # 找视频封面图（大图、非头像）
-                cover = await page.evaluate('''() => {
-                    const imgs = [...document.querySelectorAll('img')];
-                    const candidates = imgs
-                        .filter(i => (i.naturalWidth || i.width) >= 400)
-                        .map(i => i.src)
-                        .filter(s => !s.includes('avatar') && !s.includes('emblem'));
-                    return candidates[0] || '';
-                }''')
+                desc = await page.evaluate('() => document.querySelector("meta[name=description]")?.content || ""')
                 await browser.close()
-                return cover
-        cover_url = asyncio.run(get_cover())
-        if not cover_url:
-            print("  没找到封面图")
-            return []
-        
-        # 下载封面
-        import urllib.request
-        cover_path = W / "cover.jpg"
-        req = urllib.request.Request(cover_url, headers={"User-Agent":"Mozilla/5.0","Referer":"https://www.douyin.com/"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            cover_path.write_bytes(r.read())
-        
-        if cover_path.stat().st_size < 5000:
-            print("  封面图太小，跳过")
-            return []
-        
-        desc = analyze_frame(cover_path, model)
-        cover_path.unlink()
+                return desc
+        desc = asyncio.run(get_meta())
         if desc:
-            print(f"  封面: {desc[:50]}")
-            return [{"time":"cover","desc":desc}]
-        return []
+            results.append({"time":"简介","desc":desc[:300]})
+    except: pass
+
+    # 通道2：下载视频，场景检测，逐场景抽帧分析
+    try:
+        print("  📥 下载视频...", flush=True)
+        v = W / "v.mp4"
+        sh(["yt-dlp","-f","bv+ba/b","-o",str(v),"--no-playlist","--merge-output-format","mp4",url],120)
+        if not v.exists():
+            print("  视频下载失败，只用元数据")
+            return results
+
+        # HSV 场景检测
+        ok, out, _ = sh([PY,"-c",f"""
+import cv2,json,numpy as np
+c=cv2.VideoCapture(r"{v.resolve()}")
+fps=c.get(cv2.CAP_PROP_FPS) or 25; n=int(fps); s=[]; lh=None; st=0.0; pv=0.0; i=0
+while True:
+    ret,f=c.read()
+    if not ret: break
+    if i%n==0:
+        now=i/fps; h=cv2.cvtColor(f,cv2.COLOR_BGR2HSV)
+        h2=cv2.calcHist([h],[0,1],None,[50,60],[0,180,0,256]); cv2.normalize(h2,h2,0,1,cv2.NORM_MINMAX); h2=h2.flatten()
+        ch=False
+        if lh is not None and (1.0-cv2.compareHist(lh,h2,cv2.HISTCMP_CORREL))>0.3: ch=True
+        if (ch and (now-st)>=2) or (now-st)>=60: s.append({{"start":st,"end":pv}}); st=now
+        lh=h2; pv=now
+    i+=1
+if pv>st: s.append({{"start":st,"end":pv}})
+c.release(); print(json.dumps(s))
+"""],300)
+        scenes = json.loads(out) if ok and out.strip() else [{"start":0,"end":60}]
+        print(f"  {len(scenes)} 个场景")
+
+        # 逐场景抽帧分析
+        for i, sc in enumerate(scenes):
+            if i >= 8: break  # 最多8个关键场景
+            ts = sc["start"] + (sc["end"]-sc["start"])/2
+            frame = W / f"s{i:02d}.jpg"
+            sh(["ffmpeg","-ss",str(ts),"-i",str(v),"-frames:v","1","-q:v","2",str(frame)],30)
+            if frame.exists():
+                d = analyze_frame(frame, model)
+                if d:
+                    results.append({"time":f"{int(sc['start'])}s","desc":d})
+                    print(f"  [{int(sc['start'])}s] {d[:40]}")
+                frame.unlink()
+        v.unlink()
     except Exception as e:
-        print(f"  [画面分析失败] {e}")
-        return []
+        print(f"  [视频分析失败] {e}")
+
+    return results
 
 # 4. AI 蒸馏（语音+画面）
 def distill(text, vision=None):
