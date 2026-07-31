@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""扔链接 → 蒸馏 → 入库"""
+"""扔链接 → 蒸馏（语音+画面）→ 入库"""
 import argparse, json, os, subprocess, sys, time, urllib.request
 from pathlib import Path
 
@@ -42,11 +42,92 @@ def transcribe(audio):
     if text: print(f"  {len(text)} 字")
     return text
 
-# 3. AI 蒸馏
-def distill(text):
+# 3. 画面分析
+def has_local_vision():
+    """检查本地有没有视觉模型"""
+    r = subprocess.run(["ollama","list"], capture_output=True, text=True, timeout=10)
+    for m in ["llava","minicpm","bakllava","qwen2-vl"]:
+        if m in (r.stdout or "").lower(): return m
+    return None
+
+def analyze_frame(frame, model):
+    """用 Ollama 分析图片"""
+    import base64
+    try:
+        b64 = base64.b64encode(open(frame,"rb").read()).decode()
+        data = json.dumps({"model":f"{model}:latest","prompt":"简短描述这个画面里发生了什么，30字以内","images":[b64],"stream":False}).encode()
+        req = urllib.request.Request("http://localhost:11434/api/generate", data=data,
+            headers={"Content-Type":"application/json"})
+        resp = json.loads(urllib.request.urlopen(req, timeout=120).read())
+        return resp.get("response","").strip()
+    except Exception as e:
+        print(f"  [视觉失败] {e}")
+        return ""
+
+def visual_analysis(url):
+    """bb-browser思路：用浏览器拿封面图分析，不下载视频"""
+    print("[画面]", flush=True)
+    model = has_local_vision()
+    if not model:
+        print("  无本地视觉模型，跳过画面分析")
+        return []
+    print(f"  Ollama: {model}")
+    
+    try:
+        import asyncio
+        from playwright.async_api import async_playwright
+        async def get_cover():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                await asyncio.sleep(2)
+                # 找视频封面图（大图、非头像）
+                cover = await page.evaluate('''() => {
+                    const imgs = [...document.querySelectorAll('img')];
+                    const candidates = imgs
+                        .filter(i => (i.naturalWidth || i.width) >= 400)
+                        .map(i => i.src)
+                        .filter(s => !s.includes('avatar') && !s.includes('emblem'));
+                    return candidates[0] || '';
+                }''')
+                await browser.close()
+                return cover
+        cover_url = asyncio.run(get_cover())
+        if not cover_url:
+            print("  没找到封面图")
+            return []
+        
+        # 下载封面
+        import urllib.request
+        cover_path = W / "cover.jpg"
+        req = urllib.request.Request(cover_url, headers={"User-Agent":"Mozilla/5.0","Referer":"https://www.douyin.com/"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            cover_path.write_bytes(r.read())
+        
+        if cover_path.stat().st_size < 5000:
+            print("  封面图太小，跳过")
+            return []
+        
+        desc = analyze_frame(cover_path, model)
+        cover_path.unlink()
+        if desc:
+            print(f"  封面: {desc[:50]}")
+            return [{"time":"cover","desc":desc}]
+        return []
+    except Exception as e:
+        print(f"  [画面分析失败] {e}")
+        return []
+
+# 4. AI 蒸馏（语音+画面）
+def distill(text, vision=None):
     if not text.strip(): return "⚠ 无内容"
     print("[AI]", flush=True)
+    vis = ""
+    if vision:
+        vis = "\n\n画面信息：\n" + "\n".join(f"[{v['time']}] {v['desc']}" for v in vision)
     p = f"""修正错别字后，做真正的蒸馏——不是概括内容，是把里面的精华炼出来。
+结合语音内容和画面内容综合分析。
 
 每一条输出都要做到：
 - 这个经验为什么成立？（讲清楚逻辑）
@@ -58,8 +139,8 @@ def distill(text):
 ## 思维模型
 ## 怎么做
 
-内容：
-{text}"""
+语音内容：
+{text}{vis}"""
     try:
         d = json.dumps({"model":"deepseek-v4-flash","messages":[{"role":"user","content":p}],"max_tokens":1024}).encode()
         r = urllib.request.Request("https://api.deepseek.com/chat/completions",data=d,headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"})
@@ -68,7 +149,7 @@ def distill(text):
     except Exception as e: print(f"  API失败: {e}")
     return text
 
-# 4. 入库
+# 5. 入库
 def save(text, analysis, t0):
     b = Path(__file__).parent
     (b/"last_analysis.json").write_text(json.dumps({"text":text,"analysis":analysis,"elapsed":f"{time.time()-t0:.0f}s"},ensure_ascii=False,indent=2))
@@ -83,7 +164,10 @@ def save(text, analysis, t0):
     print(f"✅ {time.time()-t0:.0f}s")
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("url"); a = ap.parse_args(); t0 = time.time()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("url"); ap.add_argument("--json", action="store_true")
+    ap.add_argument("--vision", action="store_true", help="启用画面分析")
+    a = ap.parse_args(); t0 = time.time()
     # 判断图文/视频
     is_note = False
     try:
@@ -123,8 +207,14 @@ def main():
 
     audio = download(a.url)
     if not audio: return
-    text = transcribe(audio); audio.unlink(missing_ok=True)
+    text = transcribe(audio)
+    
+    vision = []
+    if a.vision:
+        vision = visual_analysis(a.url)
+    
+    audio.unlink(missing_ok=True)
     if not text: print("❌ 转录失败"); return
-    analysis = distill(text); save(text,analysis,t0); print(analysis)
+    analysis = distill(text, vision); save(text,analysis,t0); print(analysis)
 
 if __name__ == "__main__": main()
