@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "gist-video"
+version = "2.1.1"
+description = "AI视频内容蒸馏工具：扔链接，自动分析、总结拆解、提取可复用知识。支持1200+平台"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+keywords = [
+    "video-analysis", "video-transcription", "video-summarizer",
+    "whisper", "funasr", "yt-dlp", "bilibili", "douyin",
+    "content-distillation", "ai-agent", "knowledge-extraction",
+    "chinese-speech-recognition", "video-understanding"
+]
+dependencies = [
+    "yt-dlp",
+    "playwright",
+    "markdown",
+]
+
+[project.scripts]
+gist = "gist:main"
+
+[tool.setuptools]
+py-modules = ["gist", "gui", "youtube_transcript", "douyin_note", "kb"]
