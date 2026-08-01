@@ -214,10 +214,17 @@ def transcribe(audio):
             if ok and out.strip():
                 text = ' '.join(l for l in out.strip().split('\n') if not l.startswith(('Download','Processing','funasr')) and l.strip()).replace(' ','').strip()
     if not text:
-        print("[Whisper]", flush=True)
-        ok, out, _ = sh([PY,"-c",f"import whisper; m=whisper.load_model('tiny'); r=m.transcribe(r'{audio.resolve()}',language='zh',verbose=False); print(r['text'])"],1800)
-        if ok and out.strip(): text = out.strip()
+        try:
+            import whisper  # noqa
+            ok = True
+        except ImportError:
+            ok = False
+        if ok:
+            print("[Whisper]", flush=True)
+            ok, out, _ = sh([PY,"-c",f"import whisper; m=whisper.load_model('tiny'); r=m.transcribe(r'{audio.resolve()}',language='zh',verbose=False); print(r['text'])"],1800)
+            if ok and out.strip(): text = out.strip()
     if text: print(f"  {len(text)} 字", flush=True)
+    else: print("  ⚠️ 本地转录不可用：请运行 pip install funasr torch（推荐）或 openai-whisper torch", flush=True)
     return text
 
 # 3. 画面分析
@@ -424,6 +431,9 @@ def main():
         sys.exit(1)
     if not a.extract_only and not shutil.which("ffmpeg") and not Path(tool("ffmpeg")).exists():
         print("❌ 缺少 ffmpeg，请先运行: winget install ffmpeg")
+        sys.exit(1)
+    if not shutil.which("yt-dlp"):
+        print("❌ 缺少 yt-dlp，请先运行: pip install yt-dlp")
         sys.exit(1)
     # 判断图文/视频
     is_note = False
