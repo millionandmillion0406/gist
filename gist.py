@@ -250,8 +250,9 @@ def local_vision_models():
         return 5
     return sorted(names, key=rank)
 
-def analyze_frame(frame, model):
-    """用 Ollama 分析单帧画面（num_ctx 8192 保证放得下图像 token）"""
+def analyze_frame(frame, model, prompt=None):
+    """用 Ollama 分析单帧画面（num_ctx 8192 保证放得下图像 token）
+    prompt 可覆盖：图文作品传读文字指令，视频帧用画面描述"""
     import base64, io
     try:
         from PIL import Image
@@ -260,7 +261,7 @@ def analyze_frame(frame, model):
         b64 = base64.b64encode(buf.getvalue()).decode()
         data = json.dumps({
             "model": model,
-            "prompt": "这是视频的一帧截图。详细描述：画面里有什么（人物/物体/动作）、环境氛围、以及画面语言（构图、色调、镜头角度）。200字以内。",
+            "prompt": prompt or "这是视频的一帧截图。详细描述：画面里有什么（人物/物体/动作）、环境氛围、以及画面语言（构图、色调、镜头角度）。200字以内。",
             "images": [b64], "stream": False, "options": {"num_ctx": 8192}
         }).encode()
         req = urllib.request.Request("http://localhost:11434/api/generate", data=data,
@@ -522,10 +523,11 @@ def main():
                         return paths
                 for fp in asyncio.run(grab_images()):
                     for m in models:
-                        d = analyze_frame(str(fp), m)
+                        # 图文核心在图片文字上：先读字，再简述画面
+                        d = analyze_frame(str(fp), m, prompt="这是一张图文卡片/海报。请1)完整读出图片中的所有文字内容（标题、正文、金句，逐条列出，看不清的字标注[模糊]）2)一句话简述画面。不要遗漏文字。")
                         if d:
                             vision.append({"time": "图", "desc": d})
-                            print(f"  [图] {d[:50]}", flush=True)
+                            print(f"  [图] {d[:80]}", flush=True)
                             break
                     fp.unlink(missing_ok=True)
                 print(f"  {len(vision)} 张图分析完成", flush=True)
