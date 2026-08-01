@@ -482,7 +482,56 @@ def main():
         if not text:
             print("❌ 没有读到正文，请确认链接能正常打开")
             sys.exit(1)
-        finish(text); return
+        # 图片视觉分析：下载图文图片，用本地视觉模型描述画面内容
+        vision = []
+        try:
+            import asyncio
+            from playwright.async_api import async_playwright
+            models = local_vision_models()
+            if models:
+                print("  📷 下载图片...", flush=True)
+                async def grab_images():
+                    async with async_playwright() as p:
+                        browser = await p.chromium.launch(channel="msedge", headless=True)
+                        page = await browser.new_page(viewport={"width": 1200, "height": 900})
+                        await page.goto(a.url, wait_until="domcontentloaded", timeout=30000)
+                        await asyncio.sleep(4)
+                        for _ in range(15):  # 翻页加载全部图片
+                            await page.keyboard.press("ArrowRight")
+                            await asyncio.sleep(1.0)
+                        imgs = await page.evaluate('''() =>
+                            [...document.querySelectorAll('img')]
+                                .filter(i => (i.naturalWidth || i.width) >= 400 && (i.naturalHeight || i.height) >= 400)
+                                .map(i => i.src)''')
+                        seen = set(); unique = []
+                        for u in imgs:
+                            base = u.split('?')[0]
+                            if base not in seen: seen.add(base); unique.append(u)
+                        paths = []
+                        for i, src in enumerate(unique[:5]):  # 最多 5 张
+                            try:
+                                resp = await page.context.request.get(src, timeout=15000)
+                                if resp.status != 200: continue
+                                data = await resp.body()
+                                if len(data) < 5000: continue
+                                fp = W / f"n{i}.jpg"
+                                fp.write_bytes(data)
+                                paths.append(fp)
+                            except Exception: pass
+                        await browser.close()
+                        return paths
+                for fp in asyncio.run(grab_images()):
+                    for m in models:
+                        d = analyze_frame(str(fp), m)
+                        if d:
+                            vision.append({"time": "图", "desc": d})
+                            print(f"  [图] {d[:50]}", flush=True)
+                            break
+                    fp.unlink(missing_ok=True)
+                print(f"  {len(vision)} 张图分析完成", flush=True)
+        except Exception as e:
+            print(f"  [图片分析失败] {str(e)[:80]}", flush=True)
+        finish(text, vision); return
 
     youtube_text = extract_youtube_transcript(a.url)
     if youtube_text:
