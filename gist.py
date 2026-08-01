@@ -1,17 +1,75 @@
 #!/usr/bin/env python3
-"""扔链接 → 蒸馏（语音+画面）→ 入库"""
-import argparse, json, os, subprocess, sys, time, urllib.request
+"""扔链接 → 蒸馏（语音+画面）→ 入库
+零配置默认走 DeepSeek 官方（DEEPSEEK_API_KEY 环境变量），
+也支持配置覆盖（api_base/model），适配任意 OpenAI 兼容服务。
+"""
+import argparse, base64, json, os, re, shutil, subprocess, sys, time, urllib.request
 from pathlib import Path
+
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8")
 
 W = Path(__file__).parent / "tmp"; W.mkdir(exist_ok=True)
 COOKIES = Path(__file__).parent / "douyin_cookies.txt"
-KEY = os.environ.get("DEEPSEEK_API_KEY")
-if not KEY: print("❌ 需要 DEEPSEEK_API_KEY"); sys.exit(1)
+DATA_DIR = Path(__file__).parent  # 打包版会指向 %LOCALAPPDATA%\LinkDistill
+CONFIG_PATH = DATA_DIR / ".link_distill_config.json"
 PY = sys.executable
+
+# ---- 配置系统：CLI 参数/配置文件 > 环境变量 > 内置默认（适配所有人） ----
+DEFAULT_API_BASE = "https://api.deepseek.com"
+DEFAULT_MODEL = "deepseek-chat"
+
+def load_config():
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
+    except Exception:
+        return {}
+
+CONFIG = load_config()
+
+def setting(name, default=""):
+    env_map = {"api_key": "DEEPSEEK_API_KEY", "api_base": "DEEPSEEK_API_BASE", "model": "DEEPSEEK_MODEL"}
+    env = os.environ.get(env_map.get(name, ""))
+    return env or CONFIG.get(name) or default
+
+def normalize_api_base(value):
+    value = (value or "").strip().rstrip("/")
+    return value if re.match(r"^https?://", value, re.IGNORECASE) else ""
+
+def extract_url(value):
+    """从分享口令/文本中提取第一个有效链接"""
+    m = re.search(r"https?://[^\s<>\"'，。！？；【】（）]+", value or "", re.IGNORECASE)
+    return m.group(0).rstrip('，,。.!！?？:：;；)）]】') if m else ""
+
+def friendly_error(stderr, url, stage):
+    """把 yt-dlp/网络错误翻译成人话"""
+    err = (stderr or "").lower()
+    if "unsupported url" in err: return "这个链接格式不受支持"
+    if "requested format is not available" in err: return "没有可用的下载格式"
+    if "login" in err or "authentication" in err or "sign in" in err: return "该内容需要登录，请提供登录态 cookie"
+    if "georestricted" in err or "geo" in err: return "该内容有地区限制"
+    if "private video" in err or "permission" in err: return "该视频是私密/受限内容"
+    if "timed out" in err or "timeout" in err: return "网络超时，请稍后重试"
+    return f"{stage}失败，请检查链接是否有效"
+
+def tool(name):
+    """查找可执行文件（PATH → 打包目录 → 常见安装位置）"""
+    found = shutil.which(name)
+    if found: return found
+    candidates = []
+    if name == "ffmpeg":
+        candidates += [
+            Path(__file__).parent / "ffmpeg.exe",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe",
+        ]
+    for p in candidates:
+        if p.exists(): return str(p)
+    return name
 
 def sh(cmd, t=300):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=t)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=t, encoding="utf-8", errors="replace")
         return r.returncode == 0, r.stdout, r.stderr
     except: return False, "", "timeout/fail"
 
@@ -26,8 +84,73 @@ def download(url):
     a = W / "a.mp3"; a.unlink(missing_ok=True)
     cmd = ytdlp_cmd() + ["-x","--audio-format","mp3","-o",str(a),"--no-playlist",url]
     ok, _, e = sh(cmd, 180)
-    if not ok or not a.exists(): print(f"  失败: {e[-200:]}", flush=True); return None
+    if not ok or not a.exists():
+        print(f"  {friendly_error(e, url, '下载')}", flush=True); return None
     print(f"  {a.stat().st_size//1024}KB", flush=True); return a
+
+def download_browser_audio(url):
+    """兜底：yt-dlp 失败时用 headless Edge 抓媒体流（实验性，仅抖音）"""
+    if "douyin.com" not in url.lower(): return None
+    print("[浏览器视频]", flush=True)
+    media_path = W / "browser-video.mp4"; audio_path = W / "a.mp3"
+    media_path.unlink(missing_ok=True); audio_path.unlink(missing_ok=True)
+    try:
+        import asyncio
+        from playwright.async_api import async_playwright
+        async def find_media():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel="msedge", headless=True)
+                context = await browser.new_context(viewport={"width": 1280, "height": 900})
+                page = await context.new_page()
+                candidates = []
+                def capture(response):
+                    if response.request.resource_type == "media":
+                        candidates.append(response.url)
+                page.on("response", capture)
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(5)
+                try:
+                    srcs = await page.locator("video").evaluate_all("videos => videos.map(v => v.currentSrc || v.src).filter(Boolean)")
+                    candidates.extend(srcs)
+                    await page.locator("video").first.evaluate("video => video.play().catch(() => {})")
+                    await asyncio.sleep(4)
+                except Exception: pass
+                media_urls = [u for u in dict.fromkeys(reversed(candidates)) if u.startswith("http")]
+                cookies = await context.cookies()
+                cookie_header = "; ".join(f"{c['name']}={c['value']}" for c in cookies)
+                referer = page.url
+                await browser.close()
+                return media_urls, referer, cookie_header
+        media_urls, referer, cookie_header = asyncio.run(find_media())
+        if not media_urls:
+            print("  页面播放器没有返回视频", flush=True); return None
+        headers = f"Referer: {referer}\r\nCookie: {cookie_header}\r\n"
+        for media_url in media_urls[:2]:
+            audio_path.unlink(missing_ok=True)
+            ok, _, _ = sh([tool("ffmpeg"), "-y", "-headers", headers, "-i", media_url,
+                           "-vn", "-acodec", "libmp3lame", str(audio_path)], 300)
+            if ok and audio_path.exists() and audio_path.stat().st_size > 100_000:
+                print(f"  {audio_path.stat().st_size//1024}KB", flush=True)
+                return audio_path
+        return None
+    except Exception as e:
+        print(f"  [浏览器兜底失败] {str(e)[:100]}", flush=True)
+        return None
+
+def extract_youtube_transcript(url):
+    """YouTube 字幕直取（失败自动回退正常下载流程）"""
+    if not re.search(r"(?:youtube\.com|youtu\.be)", url, re.IGNORECASE): return ""
+    print("[YouTube 字幕]", flush=True)
+    try:
+        from youtube_transcript import fetch_direct
+        title, transcript = fetch_direct(url)
+        text = f"标题：{title}\n{transcript}".strip() if transcript else ""
+    except Exception:
+        text = ""
+    if text:
+        print(f"  {len(text)} 字", flush=True)
+        return text
+    return ""
 
 def download_video(url):
     """下载视频本体，多策略降级 + 自动重试（应对偶发风控/网络抖动）"""
@@ -53,12 +176,43 @@ def download_video(url):
 # 2. 转录
 def transcribe(audio):
     text = ""
-    ok, _, _ = sh([PY,"-m","pip","show","funasr"],5)
-    if ok:
-        print("[FunASR]", flush=True)
-        ok, out, _ = sh([PY,"-c",f"from funasr import AutoModel; m=AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch',disable_update=True,disable_progress=True); r=m.generate(input=r'{audio.resolve()}'); print(r[0]['text'])"],600)
-        if ok and out.strip():
-            text = ' '.join(l for l in out.strip().split('\n') if not l.startswith(('Download','Processing','funasr')) and l.strip()).replace(' ','').strip()
+    # 可选：百炼在线 ASR（配置了 DASHSCOPE_API_KEY 才启用，默认走本地 FunASR）
+    asr_key = os.environ.get("DASHSCOPE_API_KEY") or setting("asr_api_key")
+    if asr_key:
+        print("[百炼 ASR]", flush=True)
+        try:
+            send_audio = audio
+            compressed = W / "asr-small.mp3"
+            if audio.stat().st_size > 7_000_000:
+                compressed.unlink(missing_ok=True)
+                ok, _, _ = sh([tool("ffmpeg"), "-y", "-i", str(audio), "-ac", "1", "-ar", "16000",
+                               "-b:a", "32k", str(compressed)], 180)
+                if ok and compressed.exists(): send_audio = compressed
+            encoded = base64.b64encode(send_audio.read_bytes()).decode("ascii")
+            payload = json.dumps({
+                "model": "qwen3-asr-flash",
+                "messages": [{"role": "user", "content": [{"type": "input_audio",
+                    "input_audio": {"data": f"data:audio/mpeg;base64,{encoded}"}}]}],
+                "stream": False, "asr_options": {"language": "zh", "enable_itn": True},
+            }, ensure_ascii=False).encode("utf-8")
+            req = urllib.request.Request(
+                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                data=payload, headers={"Authorization": f"Bearer {asr_key}", "Content-Type": "application/json"})
+            resp = json.loads(urllib.request.urlopen(req, timeout=300).read())
+            text = resp["choices"][0]["message"]["content"].strip()
+            if text: print(f"  {len(text)} 字", flush=True)
+        except Exception as e:
+            msg = str(e).lower()
+            tip = "在线识别失败" + ("（Key 不正确）" if "401" in msg or "unauthorized" in msg else
+                  "（音频太长）" if "413" in msg else "（请求过多/额度不足）" if "429" in msg else "")
+            print(f"  {tip}，改用本地识别", flush=True)
+    if not text:
+        ok, _, _ = sh([PY,"-m","pip","show","funasr"],5)
+        if ok:
+            print("[FunASR]", flush=True)
+            ok, out, _ = sh([PY,"-c",f"from funasr import AutoModel; m=AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch',disable_update=True,disable_progress=True); r=m.generate(input=r'{audio.resolve()}'); print(r[0]['text'])"],600)
+            if ok and out.strip():
+                text = ' '.join(l for l in out.strip().split('\n') if not l.startswith(('Download','Processing','funasr')) and l.strip()).replace(' ','').strip()
     if not text:
         print("[Whisper]", flush=True)
         ok, out, _ = sh([PY,"-c",f"import whisper; m=whisper.load_model('tiny'); r=m.transcribe(r'{audio.resolve()}',language='zh',verbose=False); print(r['text'])"],1800)
@@ -69,7 +223,11 @@ def transcribe(audio):
 # 3. 画面分析
 def local_vision_models():
     """列出本机可用的视觉模型，按质量排序（qwen2.5vl 效果最好）"""
-    r = subprocess.run(["ollama","list"], capture_output=True, text=True, timeout=10)
+    if not shutil.which("ollama"): return []
+    try:
+        r = subprocess.run(["ollama","list"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+    except Exception:
+        return []
     names = []
     for line in (r.stdout or "").splitlines()[1:]:
         m = line.split()[0] if line.strip() else ""
@@ -123,7 +281,7 @@ def visual_analysis(url):
         from playwright.async_api import async_playwright
         async def get_meta():
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(channel="msedge", headless=True)
                 page = await browser.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 await asyncio.sleep(2)
@@ -212,13 +370,26 @@ def distill(text, vision=None):
 视频内容：
 {text}{vis}"""
     try:
-        # 用 deepseek-chat（非推理模型，稳定输出）。v4-flash 是推理模型，
-        # 对长 prompt 会陷入超长思考，max_tokens 全被 thinking 占掉，正文为空
-        d = json.dumps({"model":"deepseek-chat","messages":[{"role":"user","content":p}],"max_tokens":8192}).encode()
-        r = urllib.request.Request("https://api.deepseek.com/chat/completions",data=d,headers={"Authorization":f"Bearer {KEY}","Content-Type":"application/json"})
-        r2 = json.loads(urllib.request.urlopen(r,timeout=60).read())["choices"][0]["message"]["content"]
+        # 三级 fallback：配置/环境变量 > 内置默认（deepseek-chat 官方，非推理稳定）
+        api_key = setting("api_key")
+        api_base = normalize_api_base(setting("api_base")) or DEFAULT_API_BASE
+        model = setting("model") or DEFAULT_MODEL
+        if not api_key:
+            print("  API失败: 未设置 DEEPSEEK_API_KEY（可注册 deepseek.com 免费获取）", flush=True)
+            return text
+        d = json.dumps({"model":model,"messages":[{"role":"user","content":p}],"max_tokens":8192}).encode()
+        r = urllib.request.Request(f"{api_base}/chat/completions",data=d,headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"})
+        r2 = json.loads(urllib.request.urlopen(r,timeout=120).read())["choices"][0]["message"]["content"]
         if r2: print(f"  {len(r2)} 字", flush=True); return r2
-    except Exception as e: print(f"  API失败: {e}", flush=True)
+    except Exception as e:
+        msg = str(e).lower()
+        tip = ("API Key 不正确" if "401" in msg or "unauthorized" in msg else
+               "API 地址或模型名不正确" if "404" in msg or "not found" in msg else
+               "请求过多或额度不足" if "429" in msg else
+               "网络超时" if "timeout" in msg or "timed out" in msg else
+               "无法连接 API 服务器，请检查 api-base 地址和网络" if "getaddrinfo" in msg or "connection" in msg or "failed to establish" in msg else
+               str(e)[:80])
+        print(f"  API失败: {tip}", flush=True)
     return text
 
 # 5. 入库
@@ -239,7 +410,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("url"); ap.add_argument("--json", action="store_true")
     ap.add_argument("--vision", action="store_true", help="启用画面分析")
+    ap.add_argument("--extract-only", action="store_true", help="只提取转录/图文内容，不调用 AI")
+    ap.add_argument("--api-key", help="覆盖 API Key")
+    ap.add_argument("--api-base", help="覆盖完整的 http/https API 地址")
+    ap.add_argument("--model", help="覆盖模型名")
     a = ap.parse_args(); t0 = time.time()
+    if a.api_key: CONFIG["api_key"] = a.api_key
+    if a.api_base: CONFIG["api_base"] = a.api_base
+    if a.model: CONFIG["model"] = a.model
+    a.url = extract_url(a.url)
+    if not a.url:
+        print("❌ 没有找到有效的 http/https 链接")
+        sys.exit(1)
+    if not a.extract_only and not shutil.which("ffmpeg") and not Path(tool("ffmpeg")).exists():
+        print("❌ 缺少 ffmpeg，请先运行: winget install ffmpeg")
+        sys.exit(1)
     # 判断图文/视频
     is_note = False
     try:
@@ -247,11 +432,21 @@ def main():
         from playwright.async_api import async_playwright
         async def f():
             async with async_playwright() as p:
-                b = await p.chromium.launch(headless=True); page = await b.new_page()
+                b = await p.chromium.launch(channel="msedge", headless=True); page = await b.new_page()
                 await page.goto(a.url,wait_until="domcontentloaded",timeout=15000); await asyncio.sleep(1.5)
                 u = page.url; await b.close(); return u
         is_note = "/note/" in asyncio.run(f())
     except: pass
+
+    def finish(text, vision=None):
+        if a.extract_only or not setting("api_key"):
+            print(text)
+            if not a.extract_only:
+                print("\n[提示] 内容已提取；设置 DEEPSEEK_API_KEY 后可继续 AI 分析。")
+            return
+        analysis = distill(text, vision or [])
+        save(text, analysis, t0)
+        print(analysis)
 
     if is_note:
         print("[图文]", flush=True)
@@ -261,7 +456,7 @@ def main():
             from playwright.async_api import async_playwright
             async def g():
                 async with async_playwright() as p:
-                    b = await p.chromium.launch(headless=True); page = await b.new_page()
+                    b = await p.chromium.launch(channel="msedge", headless=True); page = await b.new_page()
                     await page.goto(a.url,wait_until="domcontentloaded",timeout=20000); await asyncio.sleep(2)
                     t = await page.title(); d = await page.evaluate('() => document.querySelector("meta[name=description]")?.content||""')
                     await b.close(); return f"{t}\n{d}" if d.strip() else t
@@ -274,11 +469,21 @@ def main():
                 noise = ["下载","桌面","快捷","保存登录","取消","保存","浏览器","静音","充钻石","客户端","壁纸","通知","消息","粉丝","获赞"]
                 lines = [l for l in lines if not any(k in l[:15] for k in noise)]
                 if lines: text = '\n'.join(lines)[:5000]
-        if not text: print("❌ 无内容"); return
-        analysis = distill(text); save(text,analysis,t0); print(analysis); return
+        if not text:
+            print("❌ 没有读到正文，请确认链接能正常打开")
+            sys.exit(1)
+        finish(text); return
+
+    youtube_text = extract_youtube_transcript(a.url)
+    if youtube_text:
+        finish(youtube_text); return
 
     audio = download(a.url)
-    if not audio: return
+    if not audio:
+        audio = download_browser_audio(a.url)
+    if not audio:
+        print("❌ 提取失败，请确认链接有效")
+        sys.exit(1)
     text = transcribe(audio)
     
     vision = []
@@ -286,7 +491,9 @@ def main():
         vision = visual_analysis(a.url)
     
     audio.unlink(missing_ok=True)
-    if not text: print("❌ 转录失败"); return
-    analysis = distill(text, vision); save(text,analysis,t0); print(analysis)
+    if not text:
+        print("❌ 没有识别出语音，请确认视频是否有人声")
+        sys.exit(1)
+    finish(text, vision)
 
 if __name__ == "__main__": main()

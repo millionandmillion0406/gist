@@ -6,16 +6,49 @@
 抖音、B站、YouTube、小红书、快手、微博、优酷、爱奇艺… 1200+ 平台通吃
 ```
 
+## 快速开始（2 分钟）
+
+1. 注册 [DeepSeek](https://platform.deepseek.com)（送免费额度），复制 API Key
+2. 设置环境变量：
+
+```bash
+# Windows PowerShell
+setx DEEPSEEK_API_KEY "你的key"
+# macOS / Linux
+export DEEPSEEK_API_KEY="你的key"
+```
+
+3. 扔链接：
+
+```bash
+python gist.py "https://v.douyin.com/xxxxx"
+```
+
+支持粘贴**平台分享口令**（"复制打开抖音…"整段文本直接扔进来，自动提取链接）。
+
 ## 用法
 
 ```bash
-# 就这么简单
+# 基本用法：自动判断图文还是视频
 python gist.py "https://v.douyin.com/xxxxx"
 
-# 自动判断图文还是视频，无需加参数
+# 只提取内容，不调用 AI（没有 API Key 也能用）
+python gist.py "https://... " --extract-only
+
+# 画面分析（本地 Ollama 视觉模型，可选）
+python gist.py "https://..." --vision
+
+# 使用自定义 API（中转站等任意 OpenAI 兼容服务）
+python gist.py "https://..." --api-base "https://中转站/v1" --api-key "key" --model "模型名"
 ```
 
-**没了，就这一行。** 链接扔进去，等几十秒，出来三块东西：核心洞察、思维模型、怎么做。
+**没了，就这一行。** 链接扔进去，等几十秒，出来：你的想法 + 以后可以怎么做 + 有什么例子。
+
+## 配置优先级
+
+`命令行参数 / 配置文件` > `环境变量（DEEPSEEK_API_KEY / DEEPSEEK_API_BASE / DEEPSEEK_MODEL）` > `内置默认（DeepSeek 官方 deepseek-chat）`
+
+零配置用户直接用官方默认；有自己 API 的用户覆盖即可。
 
 ## 演示
 
@@ -119,3 +152,16 @@ ollama pull llava:7b       # 老模型，当备用
 ## 致谢
 
 VideoContextEngine（场景检测）、cangjie-skill（蒸馏方法论）、FunASR（中文语音识别）、yt-dlp（视频下载）、jiji262/douyin-downloader（抖音登录参考）
+
+## 桌面版（实验性）
+
+社区贡献的 Windows 图形界面在 [`gui/`](gui/) 目录（WebView2 + pywebview）。
+当前为实验性状态，登录功能未实现，不参与 CI 发布。核心功能请用 CLI。
+
+## 开源协议
+
+[MIT](LICENSE)
+
+## 贡献
+
+你的 issue 比 star 更重要。提需求、报 bug、交 PR 都欢迎。

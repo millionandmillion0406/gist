@@ -1,0 +1,31 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install . pyinstaller
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+      - name: Build installer
+        shell: powershell
+        run: .\build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LinkDistill-Windows
+          path: release/*.exe
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: release/*.exe
